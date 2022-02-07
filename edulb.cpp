@@ -239,7 +239,7 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 	int pos;
 	char fileresults[100];
 	FILE *fp;
-	string file_m="results/"+filename(t)+"_m.ssv";
+	string file_m="../result_folder/"+filename(t)+"_m.ssv";
 	strcpy(fileresults,file_m.c_str());
 	fp=fopen(fileresults, "w+");
 	fprintf(fp, "x\ty\tux\tuy\tpress\trho\tobsval\n");

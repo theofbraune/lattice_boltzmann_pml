@@ -47,7 +47,7 @@ for line in controlDict:
 print("\bdone.")
 controlDict.close()
 
-os.chdir("./results/")
+os.chdir("../result_folder/")
 print("Removing old image files...")
 for file in glob.glob('*.png')+glob.glob('*.eps'):
 	os.remove(file)
