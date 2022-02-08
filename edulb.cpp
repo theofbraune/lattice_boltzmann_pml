@@ -55,7 +55,7 @@ const double cs2=1./3.; // D2Q9
 #include "mrt.hh"
 
 string filename(int&);
-bool read_parameter(double&, double&, double&, int&, int&, string&);
+bool read_parameter(double&, double&, double&, int&, int&, int&, int&, string&);
 bool init_vectors(vector<bool>&, vector<double>&, vector<double>&);
 bool write_results(vector<double>&, vector<double>&, vector<double>&, vector<bool>&, int);
 bool read_geometry(vector<bool>&, string);
@@ -64,9 +64,10 @@ bool check_density(vector<double>&, vector<double>&, vector<double>&, int, doubl
 bool propagation(vector<double>&, vector<double>&);
 bool pml_advection(vector<double>&, const vector<double>&);
 bool boundary(double, vector<double>&, vector<double>&, vector<bool>&);
-bool calc_macr_quantities(vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<bool>&);
+bool calc_macr_quantities(vector<double>&, vector<double>&, vector<double>&, vector<double>&,const vector<double>&, vector<bool>&);
 bool collision_srt(vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<bool>&, double);
 bool update_pml(vector<double>&, bool);
+
 
 int main(void)
 {
@@ -91,7 +92,7 @@ int main(void)
 	cout  << "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the" << endl;
 	cout  << "GNU General Public License for more details." << endl;
 	cout  << "--------------------------------------------------------------*/" << endl << endl;
-	read_parameter(density0, ux0, omegaf, dt_write, dt_density,geomfile);
+	read_parameter(density0, ux0, omegaf, dt_write, dt_density,thickness_pml,time_push, geomfile);
 	
 	vector<bool> obst(lx*ly); // obstacle
 	vector<double> f(Q*lx*ly); // node
@@ -99,11 +100,14 @@ int main(void)
 	vector<double> density(lx*ly); // mass density
 	vector<double> ux(lx*ly); // x-velocity
 	vector<double> uy(lx*ly); // y-velocity
+
+	vector<double> pml(lx*ly); //pml value
 	
 	init_vectors(obst, f, ftemp);
 	read_geometry(obst,geomfile);
 	initialisation(density, ux, uy, f, ftemp, density0, intdensity0, ux0);
 	write_results(density, ux, uy, obst, t_0);
+	update_pml(pml,false);
 	
 	/* -------------------------------------------------------------------------
 	3. Numerics
@@ -112,9 +116,17 @@ int main(void)
 
 	for (t=t_0; t<t_max+1; ++t)
 	{
+		time_step +=1;
+		//set the pml also to the left side.
+		if(time_step==950){
+			//update_pml(pml,true);
+		}
+
+		
 		propagation(f, ftemp);  // LHS of Boltzmann equation
 		boundary(ux0, f, ftemp, obst);	// boundary conditions
-		calc_macr_quantities(density, ux, uy, ftemp, obst); // calculation of macroscopic quantities
+		//pml_advection(ftemp,pml);
+		calc_macr_quantities(density, ux, uy, ftemp,pml, obst); // calculation of macroscopic quantities
 		collision_srt(density, ux, uy, f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
 //		collision_mrt(f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
 
@@ -167,7 +179,7 @@ string filename(int& t)
 /* -------------------------------------------------------------------------
 function that reads a parameter file
 --------------------------------------------------------------------------*/
-bool read_parameter(double& density0, double& ux0, double& omegaf, int& dt_write, int& dt_density, string& geomfile)
+bool read_parameter(double& density0, double& ux0, double& omegaf, int& dt_write, int& dt_density,int& thickness_pml,int& time_push, string& geomfile)
 {
 	string ab;
 	double reynolds;
@@ -185,6 +197,8 @@ bool read_parameter(double& density0, double& ux0, double& omegaf, int& dt_write
 		if (ab == "RE")				{controlDict >> reynolds;}
 		if (ab == "DT_WRIT")	{controlDict >> dt_write;}
 		if (ab == "DT_DENS")	{controlDict >> dt_density;}
+		if (ab == "TH_PML")	{controlDict >> thickness_pml;}
+		if (ab == "T_PUSH")	{controlDict >> time_push;}
 		if (ab == "GEOFILE")	{controlDict >> geomfile;}
 	}
 	controlDict.close();
@@ -337,8 +351,8 @@ bool initialisation(vector<double>& density, vector<double>& ux, vector<double>&
 		{
 			pos=x+lx*y;
 			density[pos]	=	density0;
-// 			ux[pos]				=	0.;
-			ux[pos]				=	ux0;
+ 			ux[pos]				=	0.;
+			//ux[pos]				=	ux0;
 // 		ux[pos]				=	ux0*1.5*(4.0*(y-0.5)/(ly-2) - (2.0*(y-0.5)/(ly-2))*(2.0*(y-0.5)/(ly-2))); // parabolic profile
 // 		ux[pos]				=	ux0*1.5*(4.0*y/(ly-1) - (2.0*y/(ly-1))*(2.0*y/(ly-1))); // parabolic profile
 // 		ux[pos]				=	ux0*3./2.*(2.*y/(ly-1)-(1.*y/(ly-1))*(1.*y/(ly-1))); // Nusselt's velocity profile
@@ -376,11 +390,11 @@ bool propagation(vector<double>& f, vector<double>& ftemp)
 			y==0    ? y_s=-1 : y_s=y-1; // avoiding periodic bc
 			x==0    ? x_w=-1 : x_w=x-1; // avoiding periodic bc
 
-														   ftemp[Q*(x    + y   *lx) + 0] = f[Q*pos];
-			if(x_e!=-1)							{ftemp[Q*(x_e  + y   *lx) + 1] = f[Q*pos+1];}
-			if(y_n!=-1)							{ftemp[Q*(x    + y_n *lx) + 2] = f[Q*pos+2];}
-			if(x_w!=-1)							{ftemp[Q*(x_w  + y   *lx) + 3] = f[Q*pos+3];}
-			if(y_s!=-1)							{ftemp[Q*(x    + y_s *lx) + 4] = f[Q*pos+4];}
+			ftemp[Q*(x    + y   *lx) + 0] = f[Q*pos];
+			if(x_e!=-1){ftemp[Q*(x_e  + y   *lx) + 1] = f[Q*pos+1];}
+			if(y_n!=-1){ftemp[Q*(x    + y_n *lx) + 2] = f[Q*pos+2];}
+			if(x_w!=-1){ftemp[Q*(x_w  + y   *lx) + 3] = f[Q*pos+3];}
+			if(y_s!=-1){ftemp[Q*(x    + y_s *lx) + 4] = f[Q*pos+4];}
 			if(x_e!=-1 && y_n!=-1)	{ftemp[Q*(x_e  + y_n *lx) + 5] = f[Q*pos+5];}
 			if(x_w!=-1 && y_n!=-1)	{ftemp[Q*(x_w  + y_n *lx) + 6] = f[Q*pos+6];}
 			if(x_w!=-1 && y_s!=-1)	{ftemp[Q*(x_w  + y_s *lx) + 7] = f[Q*pos+7];}
@@ -406,14 +420,29 @@ bool boundary(double ux0, vector<double>& f, vector<double>& ftemp, vector<bool>
 	for (y=1; y<ly-1; ++y)
 	{
 		pos=x+lx*y;
-		vf=ux0;
+		//vf=ux0;
+		vf = 0;
 // 		vf=ux0*1.5*(4.0*(y-0.5)/(ly-2) - (2.0*(y-0.5)/(ly-2))*(2.0*(y-0.5)/(ly-2))); // parabolic profile
 // 		vf=ux0*1.5*(4.0*y/(ly-1) - (2.0*y/(ly-1))*(2.0*y/(ly-1))); // parabolic profile
 // 		vf=ux0*3./2.*(2.*y/(ly-1)-(1.*y/(ly-1))*(1.*y/(ly-1))); // Nusselt's velocity profile
-		ru=(ftemp[Q*pos+0]+ftemp[Q*pos+2]+ftemp[Q*pos+4]+2.*(ftemp[Q*pos+3]+ftemp[Q*pos+6]+ftemp[Q*pos+7]))/(1.-vf)*vf;
-		ftemp[Q*pos+1]=ftemp[Q*pos+3]+2./3.*ru;
-		ftemp[Q*pos+5]=ftemp[Q*pos+7]+1./6.*ru+0.5*(ftemp[Q*pos+4]-ftemp[Q*pos+2]);
-		ftemp[Q*pos+8]=ftemp[Q*pos+6]+1./6.*ru+0.5*(ftemp[Q*pos+2]-ftemp[Q*pos+4]);
+		if(time_step<time_push){
+			if((y>5.5*thickness_pml) && (y<lx-5.5*thickness_pml)){
+				vf = ux0;
+				ru=(ftemp[Q*pos+0]+ftemp[Q*pos+2]+ftemp[Q*pos+4]+2.*(ftemp[Q*pos+3]+ftemp[Q*pos+6]+ftemp[Q*pos+7]))/(1.-vf)*vf;
+				ftemp[Q*pos+1]=ftemp[Q*pos+3]+2./3.*ru;
+				ftemp[Q*pos+5]=ftemp[Q*pos+7]+1./6.*ru+0.5*(ftemp[Q*pos+4]-ftemp[Q*pos+2]);
+				ftemp[Q*pos+8]=ftemp[Q*pos+6]+1./6.*ru+0.5*(ftemp[Q*pos+2]-ftemp[Q*pos+4]);
+			}else{
+				ftemp[Q*pos + 5] = ftemp[Q*pos + 6];
+				ftemp[Q*pos + 1] = ftemp[Q*pos + 3];
+				ftemp[Q*pos + 8] = ftemp[Q*pos + 7];
+			}
+		}else{
+			ftemp[Q*pos + 5] = ftemp[Q*pos + 6];
+			ftemp[Q*pos + 1] = ftemp[Q*pos + 3];
+			ftemp[Q*pos + 8] = ftemp[Q*pos + 7];
+		}
+		
 	}
 
 // 	Momentum at right end of the domain (outlet)
@@ -421,6 +450,7 @@ bool boundary(double ux0, vector<double>& f, vector<double>& ftemp, vector<bool>
 	for (y=0; y<ly; ++y)
 	{
 		pos=x+lx*y;
+		/*
 		ftemp[Q*pos+0]=aa*ftemp[Q*pos-Q+0]+ab*ftemp[Q*pos-2*Q+0]; // takes values from x=lx-2
 		ftemp[Q*pos+1]=aa*ftemp[Q*pos-Q+1]+ab*ftemp[Q*pos-2*Q+1]; // takes values from x=lx-2
 		ftemp[Q*pos+2]=aa*ftemp[Q*pos-Q+2]+ab*ftemp[Q*pos-2*Q+2]; // takes values from x=lx-2
@@ -430,6 +460,11 @@ bool boundary(double ux0, vector<double>& f, vector<double>& ftemp, vector<bool>
 		ftemp[Q*pos+6]=aa*ftemp[Q*pos-Q+6]+ab*ftemp[Q*pos-2*Q+6]; // takes values from x=lx-2
 		ftemp[Q*pos+7]=aa*ftemp[Q*pos-Q+7]+ab*ftemp[Q*pos-2*Q+7]; // takes values from x=lx-2
 		ftemp[Q*pos+8]=aa*ftemp[Q*pos-Q+8]+ab*ftemp[Q*pos-2*Q+8]; // takes values from x=lx-2
+		*/
+		ftemp[Q*pos + 6] = ftemp[Q*pos + 8];
+		ftemp[Q*pos + 3] = ftemp[Q*pos + 1];
+		ftemp[Q*pos + 7] = ftemp[Q*pos + 5];
+	
 	}
 
 	// Momentum bounce back at top wall
@@ -534,7 +569,7 @@ bool boundary(double ux0, vector<double>& f, vector<double>& ftemp, vector<bool>
 /* -------------------------------------------------------------------------
 function that calculates the macroscopic quantities
 --------------------------------------------------------------------------*/
-bool calc_macr_quantities(vector<double>& density, vector<double>& ux, vector<double>& uy, vector<double>& ftemp, vector<bool>& obst)
+bool calc_macr_quantities(vector<double>& density, vector<double>& ux, vector<double>& uy, vector<double>& ftemp, const vector<double>& pml, vector<bool>& obst)
 {
 	int x,y,pos,i;
 	double density_loc,ux_loc,uy_loc;
@@ -551,8 +586,10 @@ bool calc_macr_quantities(vector<double>& density, vector<double>& ux, vector<do
 				for (i=0; i<Q; ++i)
 				{
 					density_loc+=ftemp[Q*pos+i];
-					ux_loc+=ex[i]*ftemp[Q*pos+i];
-					uy_loc+=ey[i]*ftemp[Q*pos+i];
+					if(i>0){
+						ux_loc+=ex[i]*ftemp[Q*pos+i]*pml[pos];
+						uy_loc+=ey[i]*ftemp[Q*pos+i]*pml[pos];
+					}
 				}
 				density[pos]=density_loc;
 				ux[pos]=ux_loc/density_loc;
@@ -632,5 +669,143 @@ bool check_density(vector<double>& density, vector<double>& ux, vector<double>&u
 	}
 	printf("%11d\t% .5f %%\t%.8f", t, (intdensity-intdensity0)/intdensity0*100., ma);
 	cout << endl;
+	return(0);
+}
+
+//function that initializes the pml
+
+bool update_pml(vector<double>& pml, bool with_x){
+
+	int pos;
+
+	for(int x = 0; x<lx; x++){
+		for(int y = 0; y<ly;y++){
+			pos = x + y*ly;
+			pml[pos] = 1.;
+			if(thickness_pml>0){
+				if(y<thickness_pml){
+					pml[pos] = 0.95;
+					pml[pos] = 0.9/thickness_pml * y + 0.1;
+				}
+				if(y>ly-thickness_pml){
+					pml[pos] = 0.95;
+					pml[pos] = -0.9/thickness_pml * y + (0.1 + 0.9/thickness_pml * ly); 
+				}
+				if(x> lx-thickness_pml){
+					pml[pos] = 0.95;
+					pml[pos] = -0.9/thickness_pml * x + (0.1 + 0.9/thickness_pml * lx);
+				}
+				//check the corners
+				if((y<thickness_pml)&&(x> lx-thickness_pml)){
+					pml[pos] = 0.95;
+					pml[pos] = 0.5*(0.9/thickness_pml * y + 0.1 + -0.9/thickness_pml * x + (0.1 + 0.9/thickness_pml * lx));
+				}
+				if((y<thickness_pml)&&(x<thickness_pml)){
+					pml[pos] = 0.95;
+					pml[pos] = 0.5*(0.9/thickness_pml * y + 0.1 + 0.9/thickness_pml * x + 0.1);
+				}
+				if((y>ly-thickness_pml)&&(x> lx-thickness_pml)){
+					pml[pos] = 0.95;
+					pml[pos] = 0.5*(-0.9/thickness_pml * y + (0.1 + 0.9/thickness_pml * ly) -0.9/thickness_pml * x + (0.1 + 0.9/thickness_pml * lx) );
+				}
+				if((y>ly-thickness_pml)&&(x<thickness_pml)){
+					pml[pos] = 0.95;
+					pml[pos] = 0.5*(0.9/thickness_pml * x + 0.1 -0.9/thickness_pml * y + (0.1 + 0.9/thickness_pml * ly) );
+				}
+				if(with_x){
+					if(x<thickness_pml && x>10){
+						pml[pos] = 0.95;
+						pml[pos] = 0.9/thickness_pml * y + 0.7;
+					}
+					/*if((y>ly-thickness_pml)&&(x<thickness_pml)){
+						pml[pos] = 0.95;
+						pml[pos] = 0.5*(0.9/thickness_pml * x + 0.1 -0.9/thickness_pml * y + (0.1 + 0.9/thickness_pml * ly) );
+					}
+					if((y<thickness_pml)&&(x<thickness_pml)){
+						pml[pos] = 0.95;
+						pml[pos] = 0.5*(0.9/thickness_pml * y + 0.1 + 0.9/thickness_pml * x + 0.1);
+					}*/
+				}
+			}
+		}
+	}
+	return(0);
+}
+
+bool pml_advection(vector<double>& ftemp, const vector<double>& pml){
+	int pos;
+	double damping;
+	for(int x = 0; x<lx; x++){
+		for( int y = 0; y<ly; y++){
+			pos = x + lx*y;
+			if(pml[pos]<1){
+				damping = 0.;
+				
+				{
+					damping +=(1-pml[pos])*ftemp[Q*pos + 1];
+					ftemp[Q*pos + 1]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 2];
+					ftemp[Q*pos + 2]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 3];
+					ftemp[Q*pos + 3]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 4];
+					ftemp[Q*pos + 4]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 5];
+					ftemp[Q*pos + 5]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 6];
+					ftemp[Q*pos + 6]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 7];
+					ftemp[Q*pos + 7]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 8];
+					ftemp[Q*pos + 8]*=pml[pos];
+				}
+				/*
+				else if((y>ly-thickness_pml) &&((x>thickness_pml)&&(x<lx-thickness_pml))){
+					damping +=(1-pml[pos])*ftemp[Q*pos + 1];
+					ftemp[Q*pos + 1]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 2];
+					ftemp[Q*pos + 2]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 3];
+					ftemp[Q*pos + 4]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 5];
+					ftemp[Q*pos + 5]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 6];
+					ftemp[Q*pos + 6]*=pml[pos];
+					
+				
+				}
+				else if((x<thickness_pml)&&((y>thickness_pml)&&(y<ly-thickness_pml))){
+					
+					damping +=(1-pml[pos])*ftemp[Q*pos + 2];
+					ftemp[Q*pos + 2]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 3];
+					ftemp[Q*pos + 3]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 4];
+					ftemp[Q*pos + 4]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 6];
+					ftemp[Q*pos + 6]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 7];
+					ftemp[Q*pos + 7]*=pml[pos];
+				
+				}
+				else if(x>lx-thickness_pml &&((y>thickness_pml)&&(y<ly-thickness_pml))){
+					damping +=(1-pml[pos])*ftemp[Q*pos + 1];
+					ftemp[Q*pos + 1]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 2];
+					ftemp[Q*pos + 2]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 4];
+					ftemp[Q*pos + 4]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 5];
+					ftemp[Q*pos + 5]*=pml[pos];
+					damping +=(1-pml[pos])*ftemp[Q*pos + 8];
+					ftemp[Q*pos + 8]*=pml[pos];
+				
+				}
+				*/
+				ftemp[Q*pos + 0] +=damping;
+			}
+		}
+	}
+
 	return(0);
 }
