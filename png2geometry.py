@@ -20,7 +20,7 @@
 ############################################################################
 
 import os,sys
-import Image
+from PIL import Image
 
 try:
 	if len(sys.argv) != 2:
@@ -41,13 +41,19 @@ try:
 		for x in range(0,width):
 			for y in range(0,height):
 				dot=pix[x,y]
+				dot//=255
 				if (dot == 0) or (dot == 1):
 					"""
 					flip vertically: obstacle coordinates start
 					at bottom, image coordinates at top
 					"""
+					if(dot==0):
+						dot = 1
+					else:
+						dot=0
 					out.append("%s %s %s"%(x,height-y-1,dot))
 				else:
+					print('dot: ', dot)
 					print("wrong data")
 					raise Exception
 		print("Writing numerical data to geometry file.")

@@ -24,6 +24,6 @@ KINVISC  0.05
 RE       100.0
 DT_WRIT  50
 DT_DENS  50
-TH_PML   50
+TH_PML   0
 T_PUSH   150
-GEOFILE  ./system/k_obs
+GEOFILE  ./system/k_obs_larger

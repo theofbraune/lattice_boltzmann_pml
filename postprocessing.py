@@ -25,6 +25,7 @@ timefactor=1.
 velocityfactor=1000.
 pngheight=600
 
+compute_reference = True
 print("Running postprocessing...")
 print("Reading ./system/controlDict...")
 controlDict = open("./system/controlDict")
@@ -46,6 +47,10 @@ for line in controlDict:
 		ly=float(item[1])-1
 print("\bdone.")
 controlDict.close()
+#for the reference solution
+if(compute_reference):
+	lx = 600
+	ly = 600
 
 os.chdir("../result_folder/")
 print("Removing old image files...")
@@ -74,7 +79,7 @@ set palette gray
 set view map
 set terminal png nocrop enhanced 10 size %d,%d
 set out \"%s_m.png\"
-splot \"%s_m.ssv\" using 1:2:6 with pm3d,\
+splot \"%s_m.ssv\" using 1:2:(1*$6) with pm3d,\
 	\"%s_m.ssv\" using 1:2:(0):(%.15f*$3):(%.15f*$4):(0) every 4:4 ti \"\" with vectors head filled lt 1  lc rgb \"blue\"
 """
 %((float(file_number)*timefactor),lx,ly,pngwidth,pngheight,file_number,file_number,file_number,velocityfactor,velocityfactor))

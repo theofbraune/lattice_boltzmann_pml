@@ -66,7 +66,7 @@ bool pml_advection(vector<double>&, const vector<double>&);
 bool boundary(double, vector<double>&, vector<double>&, vector<bool>&);
 bool calc_macr_quantities(vector<double>&, vector<double>&, vector<double>&, vector<double>&,const vector<double>&, vector<bool>&);
 bool collision_srt(vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<bool>&, double);
-bool update_pml(vector<double>&, bool);
+bool update_pml(vector<double>&,vector<bool>&, bool);
 
 
 int main(void)
@@ -95,6 +95,7 @@ int main(void)
 	read_parameter(density0, ux0, omegaf, dt_write, dt_density,thickness_pml,time_push, geomfile);
 	
 	vector<bool> obst(lx*ly); // obstacle
+	vector<bool> pml_rect(lx*ly);
 	vector<double> f(Q*lx*ly); // node
 	vector<double> ftemp(Q*lx*ly); // temp. node
 	vector<double> density(lx*ly); // mass density
@@ -106,8 +107,9 @@ int main(void)
 	init_vectors(obst, f, ftemp);
 	read_geometry(obst,geomfile);
 	initialisation(density, ux, uy, f, ftemp, density0, intdensity0, ux0);
+	update_pml(pml,pml_rect, false);
 	write_results(density, ux, uy, obst, t_0);
-	update_pml(pml,false);
+	
 	
 	/* -------------------------------------------------------------------------
 	3. Numerics
@@ -257,15 +259,38 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 	strcpy(fileresults,file_m.c_str());
 	fp=fopen(fileresults, "w+");
 	fprintf(fp, "x\ty\tux\tuy\tpress\trho\tobsval\n");
+	bool save_compressed_for_reference = true;
+	bool seperate;
+	std::cout<<"entered"<<std::endl;
 
-	for (y=0; y<ly; ++y)
-	{
-		for (x=0; x<lx; ++x)
+	if(save_compressed_for_reference){
+		for (y=0; y<ly; ++y)
 		{
-			pos=x+lx*y;
-			fprintf(fp, "%.6e\t%.6e\t%.3e\t%.3e\t%.3e\t%.3e\t%d\n", double(x), double(y), ux[pos], uy[pos], density[pos]*cs2, density[pos], int(obst[pos]));
+			for (x=0; x<lx; ++x)
+			{
+				pos=x+lx*y;
+				if((x<600)&&((y>699)&&(y<1300))){
+					if(x==33 && y==1000){
+						std::cout<<" The values are: "<< double(x)<<" "<< double(y)<<" "<< ux[pos]<<" "<< uy[pos]<<std::endl;
+					}
+					
+					fprintf(fp, "%.6e\t%.6e\t%.3e\t%.3e\t%.3e\t%.3e\t%d\n", double(x), double(y-700), ux[pos], uy[pos], density[pos]*cs2, density[pos], int(obst[pos]));
+				}	
+			}
+			if((y>699)&&(y<1300)){
+				fprintf(fp, "\n");
+			}
 		}
-		fprintf(fp, "\n");
+	}else{
+		for (y=0; y<ly; ++y)
+		{
+			for (x=0; x<lx; ++x)
+			{
+				pos=x+lx*y;	
+				fprintf(fp, "%.6e\t%.6e\t%.3e\t%.3e\t%.3e\t%.3e\t%d\n", double(x), double(y), ux[pos], uy[pos], density[pos]*cs2, density[pos], int(obst[pos]));
+			}
+			fprintf(fp, "\n");
+		}
 	}
 	fclose(fp);
 	return(0);
@@ -426,7 +451,9 @@ bool boundary(double ux0, vector<double>& f, vector<double>& ftemp, vector<bool>
 // 		vf=ux0*1.5*(4.0*y/(ly-1) - (2.0*y/(ly-1))*(2.0*y/(ly-1))); // parabolic profile
 // 		vf=ux0*3./2.*(2.*y/(ly-1)-(1.*y/(ly-1))*(1.*y/(ly-1))); // Nusselt's velocity profile
 		if(time_step<time_push){
-			if((y>5.5*thickness_pml) && (y<lx-5.5*thickness_pml)){
+			//here specify the size of the outlet
+			if((y>5.5*thickness_pml) && (y<lx-5.5*thickness_pml)){ //good for pml 50
+			//if((y>975) && (y<1025)){
 				vf = ux0;
 				ru=(ftemp[Q*pos+0]+ftemp[Q*pos+2]+ftemp[Q*pos+4]+2.*(ftemp[Q*pos+3]+ftemp[Q*pos+6]+ftemp[Q*pos+7]))/(1.-vf)*vf;
 				ftemp[Q*pos+1]=ftemp[Q*pos+3]+2./3.*ru;
@@ -674,24 +701,35 @@ bool check_density(vector<double>& density, vector<double>& ux, vector<double>&u
 
 //function that initializes the pml
 
-bool update_pml(vector<double>& pml, bool with_x){
+bool update_pml(vector<double>& pml,vector<bool>& pml_rect, bool with_x){
 
 	int pos;
 
 	for(int x = 0; x<lx; x++){
 		for(int y = 0; y<ly;y++){
+			
 			pos = x + y*ly;
+			pml_rect[pos] = false;
 			pml[pos] = 1.;
 			if(thickness_pml>0){
 				if(y<thickness_pml){
+					if(y>thickness_pml-10){
+						pml_rect[pos] = true;
+					}
 					pml[pos] = 0.95;
 					pml[pos] = 0.9/thickness_pml * y + 0.1;
 				}
 				if(y>ly-thickness_pml){
+					if(y<ly-thickness_pml+10){
+						pml_rect[pos] = true;
+					}
 					pml[pos] = 0.95;
 					pml[pos] = -0.9/thickness_pml * y + (0.1 + 0.9/thickness_pml * ly); 
 				}
 				if(x> lx-thickness_pml){
+					if(x<lx-thickness_pml+10){
+						pml_rect[pos] = true;
+					}
 					pml[pos] = 0.95;
 					pml[pos] = -0.9/thickness_pml * x + (0.1 + 0.9/thickness_pml * lx);
 				}
