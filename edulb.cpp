@@ -35,6 +35,8 @@ int lx,ly;	// domain size in lattice nodes
 int t_0=0,t_max;	// maximum time steps
 double intdensity0=0.;
 int thickness_pml = 0;
+double sigma_max = 0.;
+double delta_t;
 int time_step;
 int time_push;
 string version="0.4";
@@ -55,18 +57,20 @@ const double cs2=1./3.; // D2Q9
 #include "mrt.hh"
 
 string filename(int&);
-bool read_parameter(double&, double&, double&, int&, int&, int&, int&, string&);
+bool read_parameter(double&, double&, double&,double&, int&, int&, int&, int&, string&);
 bool init_vectors(vector<bool>&, vector<double>&, vector<double>&);
 bool write_results(vector<double>&, vector<double>&, vector<double>&, vector<bool>&, int);
 bool read_geometry(vector<bool>&, string);
-bool initialisation(vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<double>&, double, double&, double);
+bool initialisation(vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<double>&,vector<double>&, double, double&, double);
 bool check_density(vector<double>&, vector<double>&, vector<double>&, int, double, int);
 bool propagation(vector<double>&, vector<double>&);
 bool pml_advection(vector<double>&, const vector<double>&);
 bool boundary(double, vector<double>&, vector<double>&, vector<bool>&);
+void boundary_stable_fluid(double, const vector<double>&, const vector<double>& , const vector<double>&, const vector<bool>&, vector<double>&, vector<double>& );
 bool calc_macr_quantities(vector<double>&, vector<double>&, vector<double>&, vector<double>&,const vector<double>&, vector<bool>&);
 bool collision_srt(vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<bool>&, double);
-bool update_pml(vector<double>&,vector<bool>&, bool);
+bool update_pml(vector<double>&, bool);
+void collision_pml(const vector<double>&,const vector<double>&, const vector<double>&,const vector<double>&, const vector<bool>&, vector<double>&, vector<double>& );
 
 
 int main(void)
@@ -92,23 +96,24 @@ int main(void)
 	cout  << "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the" << endl;
 	cout  << "GNU General Public License for more details." << endl;
 	cout  << "--------------------------------------------------------------*/" << endl << endl;
-	read_parameter(density0, ux0, omegaf, dt_write, dt_density,thickness_pml,time_push, geomfile);
+	read_parameter(density0, ux0, omegaf,sigma_max, dt_write, dt_density,thickness_pml,time_push, geomfile);
 	
 	vector<bool> obst(lx*ly); // obstacle
-	vector<bool> pml_rect(lx*ly);
 	vector<double> f(Q*lx*ly); // node
 	vector<double> ftemp(Q*lx*ly); // temp. node
 	vector<double> density(lx*ly); // mass density
 	vector<double> ux(lx*ly); // x-velocity
 	vector<double> uy(lx*ly); // y-velocity
 
-	vector<double> pml(lx*ly); //pml value
+	vector<double> pml(lx*ly); //pml damping value. usually called sigma
+	vector<double> f_eq_old(Q*lx*ly);//save the old equilibrium state.
 	
 	init_vectors(obst, f, ftemp);
 	read_geometry(obst,geomfile);
-	initialisation(density, ux, uy, f, ftemp, density0, intdensity0, ux0);
-	update_pml(pml,pml_rect, false);
+	initialisation(density, ux, uy, f, ftemp,f_eq_old, density0, intdensity0, ux0);
+	update_pml(pml, false);
 	write_results(density, ux, uy, obst, t_0);
+
 	
 	
 	/* -------------------------------------------------------------------------
@@ -126,11 +131,14 @@ int main(void)
 
 		
 		propagation(f, ftemp);  // LHS of Boltzmann equation
-		boundary(ux0, f, ftemp, obst);	// boundary conditions
+		//boundary(ux0, f, ftemp, obst);	// boundary conditions
+		boundary_stable_fluid(ux0,density,ux,uy,obst,f,ftemp);
 		//pml_advection(ftemp,pml);
 		calc_macr_quantities(density, ux, uy, ftemp,pml, obst); // calculation of macroscopic quantities
 		collision_srt(density, ux, uy, f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
-//		collision_mrt(f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
+		//collision_mrt(f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
+		//collision_pml(density, ux, uy, pml, obst, f_eq_old, f);
+
 
 		// io stuff
 		if (t%dt_density==0)
@@ -181,7 +189,7 @@ string filename(int& t)
 /* -------------------------------------------------------------------------
 function that reads a parameter file
 --------------------------------------------------------------------------*/
-bool read_parameter(double& density0, double& ux0, double& omegaf, int& dt_write, int& dt_density,int& thickness_pml,int& time_push, string& geomfile)
+bool read_parameter(double& density0, double& ux0, double& omegaf,double& sigma_max, int& dt_write, int& dt_density,int& thickness_pml,int& time_push, string& geomfile)
 {
 	string ab;
 	double reynolds;
@@ -200,6 +208,7 @@ bool read_parameter(double& density0, double& ux0, double& omegaf, int& dt_write
 		if (ab == "DT_WRIT")	{controlDict >> dt_write;}
 		if (ab == "DT_DENS")	{controlDict >> dt_density;}
 		if (ab == "TH_PML")	{controlDict >> thickness_pml;}
+		if (ab == "SIGMA_MAX")	{controlDict >> sigma_max;}
 		if (ab == "T_PUSH")	{controlDict >> time_push;}
 		if (ab == "GEOFILE")	{controlDict >> geomfile;}
 	}
@@ -216,11 +225,12 @@ bool read_parameter(double& density0, double& ux0, double& omegaf, int& dt_write
 	geometry.close();
 	
 	cout << "calculation of further quantities...";
-	ux0=reynolds*kin_visc_lb/double(ly-1);
+	//ux0=reynolds*kin_visc_lb/double(ly-1);
+	ux0=reynolds*kin_visc_lb/double(600-1);
 	omegaf=1./(3.*kin_visc_lb+0.5);
 
 	double delta_x=1./double(ly-1);
-	double delta_t=ux0*delta_x;
+	delta_t=ux0*delta_x;
 	double mach=ux0/sqrt(cs2); // Mach number
 	cout << "done." << endl;
 
@@ -259,9 +269,8 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 	strcpy(fileresults,file_m.c_str());
 	fp=fopen(fileresults, "w+");
 	fprintf(fp, "x\ty\tux\tuy\tpress\trho\tobsval\n");
-	bool save_compressed_for_reference = true;
-	bool seperate;
-	std::cout<<"entered"<<std::endl;
+	bool save_compressed_for_reference = false;
+	
 
 	if(save_compressed_for_reference){
 		for (y=0; y<ly; ++y)
@@ -364,7 +373,7 @@ bool read_geometry(vector<bool>& obst, string geomfile)
 /* -------------------------------------------------------------------------
 function that initialises the density and velocity field
 --------------------------------------------------------------------------*/
-bool initialisation(vector<double>& density, vector<double>& ux, vector<double>& uy, vector<double>& f, vector<double>& ftemp, double density0, double& intdensity0, double ux0)
+bool initialisation(vector<double>& density, vector<double>& ux, vector<double>& uy, vector<double>& f, vector<double>& ftemp,vector<double>& f_eq_old, double density0, double& intdensity0, double ux0)
 {
 	cout << "initialise density and velocity field, particle density distribution functions...";
 	int x,y,i;
@@ -388,6 +397,7 @@ bool initialisation(vector<double>& density, vector<double>& ux, vector<double>&
 			{
 				f[Q*pos+i]    =density[pos]*rt[i]*(1. + (ex[i]*ux[pos]+ey[i]*uy[pos])/cs2 + (ex[i]*ux[pos]+ey[i]*uy[pos])*(ex[i]*ux[pos]+ey[i]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));;
 				ftemp[Q*pos+i]=density[pos]*rt[i]*(1. + (ex[i]*ux[pos]+ey[i]*uy[pos])/cs2 + (ex[i]*ux[pos]+ey[i]*uy[pos])*(ex[i]*ux[pos]+ey[i]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));;
+				f_eq_old[Q*pos+i]=density[pos]*rt[i]*(1. + (ex[i]*ux[pos]+ey[i]*uy[pos])/cs2 + (ex[i]*ux[pos]+ey[i]*uy[pos])*(ex[i]*ux[pos]+ey[i]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
 			}
 			intdensity0+=density[pos];
 		}
@@ -437,8 +447,8 @@ bool boundary(double ux0, vector<double>& f, vector<double>& ftemp, vector<bool>
 	int x,y,i;
 	int pos;
 	double vf, ru, density_loc;
-	double aa=1., ab=0.; // only first order accuracy
-// 	double aa=2., ab=-1.; // second order accuracy
+	//double aa=1., ab=0.; // only first order accuracy
+	//double aa=2., ab=-1.; // second order accuracy
 
 // 	Momentum at left end of domain (inlets)
 	x=0; // velocity inlet at top of the domain, Zou and He
@@ -451,9 +461,10 @@ bool boundary(double ux0, vector<double>& f, vector<double>& ftemp, vector<bool>
 // 		vf=ux0*1.5*(4.0*y/(ly-1) - (2.0*y/(ly-1))*(2.0*y/(ly-1))); // parabolic profile
 // 		vf=ux0*3./2.*(2.*y/(ly-1)-(1.*y/(ly-1))*(1.*y/(ly-1))); // Nusselt's velocity profile
 		if(time_step<time_push){
-			//here specify the size of the outlet
-			if((y>5.5*thickness_pml) && (y<lx-5.5*thickness_pml)){ //good for pml 50
-			//if((y>975) && (y<1025)){
+			//here specify the size of the outlet, resp the blast.
+			//if((y>5.5*thickness_pml) && (y<lx-5.5*thickness_pml)){ //good for pml 50
+			if((y>975) && (y<1025)){ //inlet for the simulation on the reference solution
+				
 				vf = ux0;
 				ru=(ftemp[Q*pos+0]+ftemp[Q*pos+2]+ftemp[Q*pos+4]+2.*(ftemp[Q*pos+3]+ftemp[Q*pos+6]+ftemp[Q*pos+7]))/(1.-vf)*vf;
 				ftemp[Q*pos+1]=ftemp[Q*pos+3]+2./3.*ru;
@@ -614,8 +625,8 @@ bool calc_macr_quantities(vector<double>& density, vector<double>& ux, vector<do
 				{
 					density_loc+=ftemp[Q*pos+i];
 					if(i>0){
-						ux_loc+=ex[i]*ftemp[Q*pos+i]*pml[pos];
-						uy_loc+=ey[i]*ftemp[Q*pos+i]*pml[pos];
+						ux_loc+=ex[i]*ftemp[Q*pos+i];
+						uy_loc+=ey[i]*ftemp[Q*pos+i];
 					}
 				}
 				density[pos]=density_loc;
@@ -676,6 +687,447 @@ bool collision_srt(vector<double>& density, vector<double>& ux, vector<double>& 
 	return(0);
 }
 
+
+/*-------------------------------------------------------------------------
+function that performes the LBM PML collision term.
+-------------------------------------------------------------------------*/
+void collision_pml(const vector<double>& density,const vector<double>& ux,const vector<double>& uy,const vector<double>& pml, const vector<bool>& obst, vector<double>& f_eq_old, vector<double>& f ){
+
+	int pos, x, y;
+	double density_loc, ux_loc, uy_loc, u2;
+	double omega_pml;
+	
+	vector<double> f_eq(Q*lx*ly);
+	//compute the equilibrium distribution
+	for(x= 0; x<lx; x++){
+		for(y = 0; y<lx; y++){
+			pos = lx*y + x;
+			//only when we are away from obstacle
+			if (!obst[pos])
+			{
+				density_loc=density[pos];
+				ux_loc=ux[pos];
+				uy_loc=uy[pos];
+				u2=ux_loc*ux_loc+uy_loc*uy_loc; // square of velocity
+				for (int i=0; i<Q; ++i)
+				{
+					// calculating equilibrium distribution, e. (2)
+					f_eq[Q*pos + i]=density_loc*rt[i]*(1. + (ex[i]*ux_loc+ey[i]*uy_loc)/cs2 + (ex[i]*ux_loc+ey[i]*uy_loc)*(ex[i]*ux_loc+ey[i]*uy_loc)/(2.*cs2*cs2) - u2/(2.*cs2));
+				}
+			}
+		}
+	}
+
+	for( x = 0; x<lx; x++){
+		for( y = 0; y<ly; y++){
+			pos = lx*y + x;
+			if(!obst[pos]){
+				//check if we are in the pml area
+				if(pml[pos]>0){
+					omega_pml = 0.;
+					for(int i=0; i<Q;i++){
+						
+						//first handle the non boundary case. 
+						if(((x>0)&&(y>0))&&((x<lx-1)&&(y<ly-1))){
+							//add the initial equilibrium distribution. Check whether we need to subtract the starting mean
+							omega_pml+=2*f_eq[Q*pos + i];
+
+							//add the quantity for the  Q_i, i.e the integrated
+							omega_pml += 0.5*(f_eq[Q*pos + i] + f_eq_old[Q*pos + i]);
+
+							//add the quantity for the gradient of the Q_i
+							//i==0 not interesing, as c0 = (0,0). Compute now $c_i\cdot \nabla Q_i $
+							//note that in our case dx = 1. Hence for the gradient
+							
+							//compute the auxiliary quantity for all neighbors. Thus define center, north, south, east, west.
+							double psi_n, psi_w, psi_e,psi_s;
+							//psi_c = 0.5*(f_eq[Q*pos + i] + f_eq_old[Q*pos + i]);
+							psi_e = 0.5*(f_eq[Q*(lx*y+x+1) + i] + f_eq_old[Q*(lx*y+x+1) + i]);
+							psi_w = 0.5*(f_eq[Q*(lx*y+x-1) + i] + f_eq_old[Q*(lx*y+x-1) + i]);
+							psi_n = 0.5*(f_eq[Q*(lx*(y+1)+x) + i] + f_eq_old[Q*(lx*(y+1)+x) + i]);
+							psi_s = 0.5*(f_eq[Q*(lx*(y-1)+x) + i] + f_eq_old[Q*(lx*(y-1)+x) + i]);
+							//compute the partial derivatives with a central difference scheme
+							double dpsi_x, dpsi_y;
+							dpsi_x = 0.5*(psi_e - psi_w);
+							dpsi_y = 0.5*(psi_n - psi_s);
+							//perform the central difference approximation of the gradient of psi
+							{
+								if(i==1){
+									//c1 = (1,0)
+									omega_pml+= dpsi_x;
+								}
+								if(i==2){
+									//c2 = (0,1)								
+									omega_pml+=dpsi_y;
+								}
+								if(i==3){
+									//c3 = (-1,0)
+									omega_pml -=dpsi_x;
+								}
+								if(i==4){
+									//c4 = (0,-1)
+									omega_pml-=dpsi_y;
+								}
+								if(i==5){
+									//c5 = (1,1)
+									omega_pml+=dpsi_x + dpsi_y;
+								}
+								if(i==6){
+									//c6 =(-1,1)
+									omega_pml +=dpsi_y - dpsi_x;
+								}
+								if(i==7){
+									//c7 = (-1,-1)
+									omega_pml += -dpsi_y -dpsi_x;
+								}
+								if(i==8){
+									//c8 = (1,-1)
+									omega_pml += dpsi_x - dpsi_y;
+								}
+							}
+							//multiplicatin of the damping parameter
+							omega_pml*=-pml[pos];
+
+							f[Q*pos+i]+=omega_pml;
+							
+						}
+					}
+				}
+			}
+		}
+	}
+	//overwrite the old equilibrium state with the newer one
+	f_eq_old = f_eq;
+	
+}
+
+/*-------------------------------------------------------------------------
+function that performes the stable fluid boundary treatment
+-------------------------------------------------------------------------*/
+void boundary_stable_fluid(double ux0, const vector<double>& density, const vector<double>& ux, const vector<double>& uy, const vector<bool>& obst, vector<double>& f, vector<double>& ftemp ){
+	int x,y,i;
+	int pos;
+	double vf, ru, density_loc;
+
+	//first consider left inlet
+	x=0; // velocity inlet at top of the domain, Zou and He
+	for (y=1; y<ly-1; ++y)
+	{
+		pos=x+lx*y;
+		//vf=ux0;
+		vf = 0;
+		// vf=ux0*1.5*(4.0*(y-0.5)/(ly-2) - (2.0*(y-0.5)/(ly-2))*(2.0*(y-0.5)/(ly-2))); // parabolic profile
+		// vf=ux0*1.5*(4.0*y/(ly-1) - (2.0*y/(ly-1))*(2.0*y/(ly-1))); // parabolic profile
+		// vf=ux0*3./2.*(2.*y/(ly-1)-(1.*y/(ly-1))*(1.*y/(ly-1))); // Nusselt's velocity profile
+		if(time_step<time_push){
+			//here specify the size of the outlet, resp the blast.
+			//if((y>5.5*thickness_pml) && (y<lx-5.5*thickness_pml)){ //good for pml 50 and size 600
+			//if((y>975) && (y<1025)){
+			if(true){
+				
+				vf = ux0;
+				ru=(ftemp[Q*pos+0]+ftemp[Q*pos+2]+ftemp[Q*pos+4]+2.*(ftemp[Q*pos+3]+ftemp[Q*pos+6]+ftemp[Q*pos+7]))/(1.-vf)*vf;
+				ftemp[Q*pos+1]=ftemp[Q*pos+3]+2./3.*ru;
+				ftemp[Q*pos+5]=ftemp[Q*pos+7]+1./6.*ru+0.5*(ftemp[Q*pos+4]-ftemp[Q*pos+2]);
+				ftemp[Q*pos+8]=ftemp[Q*pos+6]+1./6.*ru+0.5*(ftemp[Q*pos+2]-ftemp[Q*pos+4]);
+			}else{
+				ftemp[Q*pos + 5] = ftemp[Q*pos + 7];
+				ftemp[Q*pos + 1] = ftemp[Q*pos + 3];
+				ftemp[Q*pos + 8] = ftemp[Q*pos + 6];
+			}
+		}else{
+			//here use the stable fluid
+			ftemp[Q*pos + 5] = ftemp[Q*pos + 7];
+			ftemp[Q*pos + 1] = ftemp[Q*pos + 3];
+			ftemp[Q*pos + 8] = ftemp[Q*pos + 6];
+		}
+		
+	}
+
+	// Stable fluid at top wall
+	y=ly-1;
+	for(x=1; x<lx-1; ++x)
+	{
+		pos=x+y*lx;
+		double ux_loc, uy_loc;
+		double x_back, y_back, ux_back, uy_back, rho_back, u2_back;
+		int x_left, x_right, y_up, y_down;
+		double ux_down, ux_up, uy_down, uy_up, rho_down, rho_up;
+		ux_loc = ux[pos];
+		uy_loc = uy[pos];
+		//Euler Step for backtracking
+		x_back = (double(x) - delta_t*ux_loc);
+		y_back = double(y) - delta_t*uy_loc;
+		//check if we are in the physical domain
+		if(x==90){
+			
+			/*std::cout<< "delta t "<<delta_t<<std::endl;
+			std::cout<< "ux_loc "<<ux_loc<<std::endl;
+			std::cout<< " x-back: "<<x_back<<std::endl;
+			std::cout<< " y-back: "<<y_back<<std::endl;
+			*/
+		}
+
+		if(((x_back >= 0.)&&(x_back<double(lx-1)))&&((y_back>=0.)&&(y_back<double(ly-1)))){
+			//here hidden error
+			x_left = trunc(x_back);
+			x_right = x_left+1;
+			y_down = trunc(y_back);
+			y_up = y_down+1;
+			
+			//bilinear interpolation of the quantities
+			ux_down = (double(x_right)-x_back)*ux[x_right + y_down*ly] + (x_back - double(x_left))*ux[x_left + y_down*ly ];
+			ux_up = (double(x_right)-x_back)*ux[x_right + y_up*ly] + (x_back - double(x_left))*ux[x_left + y_up*ly ];
+			ux_back = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+			
+			uy_down = (double(x_right)-x_back)*uy[x_right + y_down*ly] + (x_back - double(x_left))*uy[x_left + y_down*ly ];
+			uy_up = (double(x_right)-x_back)*uy[x_right + y_up*ly] + (x_back - double(x_left))*uy[x_left + y_up*ly ];
+			uy_back = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+
+			rho_down = (double(x_right)-x_back)*density[x_right + y_down*ly] + (x_back - double(x_left))*density[x_left + y_down*ly ];
+			rho_up = (double(x_right)-x_back)*density[x_right + y_up*ly] + (x_back - double(x_left))*density[x_left + y_up*ly ];
+			rho_back = (double(y_up) - y_back)*rho_up + (y_back - double(y_down))*rho_down;
+
+			u2_back = ux_back*ux_back + uy_back*uy_back;
+			//use these quantities for the equilibrium distribution
+			//rho_back*rt[i]*(1. + (ex[i]*ux[pos]+ey[i]*uy[pos])/cs2 + (ex[i]*ux[pos]+ey[i]*uy[pos])*(ex[i]*ux[pos]+ey[i]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+			ftemp[Q*pos + 8] = rho_back*rt[8]*(1. + (ex[8]*ux_back+ey[8]*uy_back)/cs2 + (ex[8]*ux_back+ey[8]*uy_back)*(ex[8]*ux_back+ey[8]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			ftemp[Q*pos + 4] = rho_back*rt[4]*(1. + (ex[4]*ux_back+ey[4]*uy_back)/cs2 + (ex[4]*ux_back+ey[4]*uy_back)*(ex[4]*ux_back+ey[4]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			ftemp[Q*pos + 7] = rho_back*rt[7]*(1. + (ex[7]*ux_back+ey[7]*uy_back)/cs2 + (ex[7]*ux_back+ey[7]*uy_back)*(ex[7]*ux_back+ey[7]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+
+			//std::cout<<"time: "<<time_step<<" We are inside the domain"<<std::endl;
+		}else{//case when we leave the domain. In this case just take the former value.
+			/*
+			std::cout<< "delta t "<<delta_t<<std::endl;
+			std::cout<< "ux_loc "<<ux_loc<<std::endl;
+			std::cout<< " x-back: "<<x_back<<std::endl;
+			std::cout<< " y-back: "<<y_back<<std::endl;
+			std::cout<<"time: "<<time_step<<" We are outside the domain"<<std::endl;
+			*/
+			double u2=ux[pos]*ux[pos]+uy[pos]*uy[pos];
+			ftemp[Q*pos + 7] = density[pos]*rt[7]*(1. + (ex[7]*ux[pos]+ey[7]*uy[pos])/cs2 + (ex[7]*ux[pos]+ey[7]*uy[pos])*(ex[7]*ux[pos]+ey[7]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+			ftemp[Q*pos + 4] = density[pos]*rt[4]*(1. + (ex[4]*ux[pos]+ey[4]*uy[pos])/cs2 + (ex[4]*ux[pos]+ey[4]*uy[pos])*(ex[4]*ux[pos]+ey[4]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+			ftemp[Q*pos + 8] = density[pos]*rt[8]*(1. + (ex[8]*ux[pos]+ey[8]*uy[pos])/cs2 + (ex[8]*ux[pos]+ey[8]*uy[pos])*(ex[8]*ux[pos]+ey[8]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+		}
+	
+		//ftemp[Q*pos + 7] = ftemp[Q*pos + 5];
+		//ftemp[Q*pos + 4] = ftemp[Q*pos + 2];
+		//ftemp[Q*pos + 8] = ftemp[Q*pos + 6];
+	}
+
+	// Stable fluid at bottom wall
+	y=0;
+	for(x=1;x<lx-1;++x)
+	{
+		pos=x+y*lx;
+		double ux_loc, uy_loc;
+		double x_back, y_back, ux_back, uy_back, rho_back, u2_back;
+		int x_left, x_right, y_up, y_down;
+		double ux_down, ux_up, uy_down, uy_up, rho_down, rho_up;
+		ux_loc = ux[pos];
+		uy_loc = uy[pos];
+		//Euler Step for backtracking
+		x_back = double(x) - delta_t*ux_loc;
+		y_back = double(y) - delta_t*uy_loc;
+		//check if we are in the physical domain
+		/*
+		std::cout<< "delta t "<<delta_t<<std::endl;
+		std::cout<< "ux_loc "<<ux_loc<<std::endl;
+		std::cout<< " x-back: "<<x_back<<std::endl;
+		std::cout<< " y-back: "<<y_back<<std::endl;
+		*/
+
+		if(((x_back >= 0.)&&(x_back<=double(lx-1)))&&((y_back>=0.)&&(y_back<=double(ly-1)))){
+			x_left = trunc(x_back);
+			x_right = x_left+1;
+			y_down = trunc(y_back);
+			y_up = y_down+1;
+			
+			//bilinear interpolation of the quantities
+			ux_down = (double(x_right)-x_back)*ux[x_right + y_down*ly] + (x_back - double(x_left))*ux[x_left + y_down*ly ];
+			ux_up = (double(x_right)-x_back)*ux[x_right + y_up*ly] + (x_back - double(x_left))*ux[x_left + y_up*ly ];
+			ux_back = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+			
+			uy_down = (double(x_right)-x_back)*uy[x_right + y_down*ly] + (x_back - double(x_left))*uy[x_left + y_down*ly ];
+			uy_up = (double(x_right)-x_back)*uy[x_right + y_up*ly] + (x_back - double(x_left))*uy[x_left + y_up*ly ];
+			uy_back = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+
+			rho_down = (double(x_right)-x_back)*density[x_right + y_down*ly] + (x_back - double(x_left))*density[x_left + y_down*ly ];
+			rho_up = (double(x_right)-x_back)*density[x_right + y_up*ly] + (x_back - double(x_left))*density[x_left + y_up*ly ];
+			rho_back = (double(y_up) - y_back)*rho_up + (y_back - double(y_down))*rho_down;
+
+			u2_back = ux_back*ux_back + uy_back*uy_back;
+			//use these quantities for the equilibrium distribution
+			//rho_back*rt[i]*(1. + (ex[i]*ux[pos]+ey[i]*uy[pos])/cs2 + (ex[i]*ux[pos]+ey[i]*uy[pos])*(ex[i]*ux[pos]+ey[i]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+			ftemp[Q*pos + 6] = rho_back*rt[6]*(1. + (ex[6]*ux_back+ey[6]*uy_back)/cs2 + (ex[6]*ux_back+ey[6]*uy_back)*(ex[6]*ux_back+ey[6]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			ftemp[Q*pos + 2] = rho_back*rt[2]*(1. + (ex[2]*ux_back+ey[2]*uy_back)/cs2 + (ex[2]*ux_back+ey[2]*uy_back)*(ex[2]*ux_back+ey[2]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			ftemp[Q*pos + 5] = rho_back*rt[5]*(1. + (ex[5]*ux_back+ey[5]*uy_back)/cs2 + (ex[5]*ux_back+ey[5]*uy_back)*(ex[5]*ux_back+ey[5]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+
+			//std::cout<<"time: "<<time_step<<" We are inside the domain"<<std::endl;
+		}else{//case when we leave the domain. In this case just take the former value.
+			/*
+			std::cout<< "delta t "<<delta_t<<std::endl;
+			std::cout<< "ux_loc "<<ux_loc<<std::endl;
+			std::cout<< " x-back: "<<x_back<<std::endl;
+			std::cout<< " y-back: "<<y_back<<std::endl;
+			std::cout<<"time: "<<time_step<<" We are outside the domain"<<std::endl;
+			*/
+			double u2=ux[pos]*ux[pos]+uy[pos]*uy[pos];
+			ftemp[Q*pos + 6] = density[pos]*rt[6]*(1. + (ex[6]*ux[pos]+ey[6]*uy[pos])/cs2 + (ex[6]*ux[pos]+ey[6]*uy[pos])*(ex[6]*ux[pos]+ey[6]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+			ftemp[Q*pos + 2] = density[pos]*rt[2]*(1. + (ex[2]*ux[pos]+ey[2]*uy[pos])/cs2 + (ex[2]*ux[pos]+ey[2]*uy[pos])*(ex[2]*ux[pos]+ey[2]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+			ftemp[Q*pos + 5] = density[pos]*rt[5]*(1. + (ex[5]*ux[pos]+ey[5]*uy[pos])/cs2 + (ex[5]*ux[pos]+ey[5]*uy[pos])*(ex[5]*ux[pos]+ey[5]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+		}
+	}
+	
+	//Stable fluid at the back wall
+	x = lx-1;
+	for(y = 1; y<ly-1;y++){
+
+		pos=x+lx*y;
+		//define local and interpolated quantities.
+		double ux_loc, uy_loc;
+		double x_back, y_back, ux_back, uy_back, rho_back, u2_back;
+		int x_left, x_right, y_up, y_down;
+		double ux_down, ux_up, uy_down, uy_up, rho_down, rho_up;
+		ux_loc = ux[pos];
+		uy_loc = uy[pos];
+		//Euler Step for backtracking
+		x_back = double(x) - delta_t*ux_loc;
+		y_back = double(y) - delta_t*uy_loc;
+		//check if we are in the physical domain
+		/*
+		std::cout<< "delta t "<<delta_t<<std::endl;
+		std::cout<< "ux_loc "<<ux_loc<<std::endl;
+		std::cout<< " x-back: "<<x_back<<std::endl;
+		std::cout<< " y-back: "<<y_back<<std::endl;
+		*/
+
+		if(((x_back >= 0.)&&(x_back<double(lx-1)))&&((y_back>=0.)&&(y_back<=double(ly-1)))){
+			x_left = trunc(x_back);
+			x_right = x_left+1;
+			y_down = trunc(y_back);
+			y_up = y_down+1;
+			
+			//bilinear interpolation of the quantities
+			ux_down = (double(x_right)-x_back)*ux[x_right + y_down*ly] + (x_back - double(x_left))*ux[x_left + y_down*ly ];
+			ux_up = (double(x_right)-x_back)*ux[x_right + y_up*ly] + (x_back - double(x_left))*ux[x_left + y_up*ly ];
+			ux_back = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+			
+			uy_down = (double(x_right)-x_back)*uy[x_right + y_down*ly] + (x_back - double(x_left))*uy[x_left + y_down*ly ];
+			uy_up = (double(x_right)-x_back)*uy[x_right + y_up*ly] + (x_back - double(x_left))*uy[x_left + y_up*ly ];
+			uy_back = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+
+			rho_down = (double(x_right)-x_back)*density[x_right + y_down*ly] + (x_back - double(x_left))*density[x_left + y_down*ly ];
+			rho_up = (double(x_right)-x_back)*density[x_right + y_up*ly] + (x_back - double(x_left))*density[x_left + y_up*ly ];
+			rho_back = (double(y_up) - y_back)*rho_up + (y_back - double(y_down))*rho_down;
+
+			u2_back = ux_back*ux_back + uy_back*uy_back;
+			//use these quantities for the equilibrium distribution
+			//rho_back*rt[i]*(1. + (ex[i]*ux[pos]+ey[i]*uy[pos])/cs2 + (ex[i]*ux[pos]+ey[i]*uy[pos])*(ex[i]*ux[pos]+ey[i]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+			ftemp[Q*pos + 6] = rho_back*rt[6]*(1. + (ex[6]*ux_back+ey[6]*uy_back)/cs2 + (ex[6]*ux_back+ey[6]*uy_back)*(ex[6]*ux_back+ey[6]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			ftemp[Q*pos + 3] = rho_back*rt[3]*(1. + (ex[3]*ux_back+ey[3]*uy_back)/cs2 + (ex[3]*ux_back+ey[3]*uy_back)*(ex[3]*ux_back+ey[3]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			ftemp[Q*pos + 7] = rho_back*rt[7]*(1. + (ex[7]*ux_back+ey[7]*uy_back)/cs2 + (ex[7]*ux_back+ey[7]*uy_back)*(ex[7]*ux_back+ey[7]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+
+			//std::cout<<"time: "<<time_step<<" We are inside the domain"<<std::endl;
+		}else{//case when we leave the domain. In this case just take the former value.
+			/*
+			std::cout<< "delta t "<<delta_t<<std::endl;
+			std::cout<< "ux_loc "<<ux_loc<<std::endl;
+			std::cout<< " x-back: "<<x_back<<std::endl;
+			std::cout<< " y-back: "<<y_back<<std::endl;
+			std::cout<<"time: "<<time_step<<" We are outside the domain"<<std::endl;
+			*/
+			double u2=ux[pos]*ux[pos]+uy[pos]*uy[pos];
+			ftemp[Q*pos + 6] = density[pos]*rt[6]*(1. + (ex[6]*ux[pos]+ey[6]*uy[pos])/cs2 + (ex[6]*ux[pos]+ey[6]*uy[pos])*(ex[6]*ux[pos]+ey[6]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+			ftemp[Q*pos + 3] = density[pos]*rt[3]*(1. + (ex[3]*ux[pos]+ey[3]*uy[pos])/cs2 + (ex[3]*ux[pos]+ey[3]*uy[pos])*(ex[3]*ux[pos]+ey[3]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+			ftemp[Q*pos + 7] = density[pos]*rt[7]*(1. + (ex[7]*ux[pos]+ey[7]*uy[pos])/cs2 + (ex[7]*ux[pos]+ey[7]*uy[pos])*(ex[7]*ux[pos]+ey[7]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
+		}
+
+
+	}
+
+	//corner treatment
+	{
+		/*
+		// south-west corner of the inlet has to be defined
+		pos = lx; // = 0+lx*1
+		density_loc = 0.0;
+		for(i=0; i<Q; ++i)
+		{
+			density_loc += ftemp[Q*pos + i];
+		}
+		pos = 0;
+		ftemp[Q*pos + 2] = ftemp[Q*pos + 4];
+		ftemp[Q*pos + 1] = ftemp[Q*pos + 3];
+		ftemp[Q*pos + 5] = ftemp[Q*pos + 7];
+		ftemp[Q*pos + 6] = 0.5*(density_loc - ftemp[Q*pos] - 2.*(ftemp[Q*pos + 2] + ftemp[Q*pos + 1] + ftemp[Q*pos + 5]));
+		ftemp[Q*pos + 8] = ftemp[Q*pos + 6];
+
+		// north-west corner of the inlet has to be defined
+		pos = lx*(ly-2); // = 0+lx*(ly-2)
+		density_loc = 0.0;
+		for(i=0; i<Q; ++i)
+		{
+			density_loc += ftemp[Q*pos + i];
+		}
+		pos = lx*(ly-1);
+		ftemp[Q*pos + 4] = ftemp[Q*pos + 2];
+		ftemp[Q*pos + 1] = ftemp[Q*pos + 3];
+		ftemp[Q*pos + 8] = ftemp[Q*pos + 6];
+		ftemp[Q*pos + 7] = 0.5*(density_loc - ftemp[Q*pos] - 2.*(ftemp[Q*pos + 2] + ftemp[Q*pos + 3] + ftemp[Q*pos + 6]));
+		ftemp[Q*pos + 5] = ftemp[Q*pos + 7];
+
+		//south-east corner of the outlet has to be defined
+		pos = (lx-1)+lx; // = (lx-1)+lx*1
+		density_loc = 0.0;
+		for(i=0; i<Q; ++i)
+		{
+			density_loc += ftemp[Q*pos + i];
+		}
+		pos = lx-1;// = (lx-1)+lx*0
+		ftemp[Q*pos + 2] = ftemp[Q*pos + 4];
+		ftemp[Q*pos + 3] = ftemp[Q*pos + 1];
+		ftemp[Q*pos + 6] = ftemp[Q*pos + 8];
+		ftemp[Q*pos + 5] = 0.5*(density_loc - ftemp[Q*pos] - 2.*(ftemp[Q*pos + 2] + ftemp[Q*pos + 3] + ftemp[Q*pos + 6]));
+		ftemp[Q*pos + 7] = ftemp[Q*pos + 5];
+
+		// north-east corner of the inlet has to be defined
+		pos = (lx-1)+lx*(ly-2); // = (lx-1)+lx*(ly-2)
+		density_loc = 0.0;
+		for(i=0; i<Q; ++i)
+		{
+			density_loc += ftemp[Q*pos + i];
+		}
+		pos = (lx-1)+lx*(ly-1);
+		ftemp[Q*pos + 4] = ftemp[Q*pos + 2];
+		ftemp[Q*pos + 3] = ftemp[Q*pos + 1];
+		ftemp[Q*pos + 7] = ftemp[Q*pos + 5];
+		ftemp[Q*pos + 8] = 0.5*(density_loc - ftemp[Q*pos] - 2.*(ftemp[Q*pos + 4] + ftemp[Q*pos + 3] + ftemp[Q*pos + 7]));
+		ftemp[Q*pos + 6] = ftemp[Q*pos + 8];
+		*/
+	}
+	//obstacle treatment
+	for (y=1; y<ly-1; ++y)
+	{
+		for (x=1; x<lx-1; ++x)
+		{
+			pos=x+lx*y;
+			if (obst[pos]) // bounce-back at all inner obstacle nodes
+			{
+				f[Q*pos+1] = ftemp[Q*pos+3];
+				f[Q*pos+2] = ftemp[Q*pos+4];
+				f[Q*pos+3] = ftemp[Q*pos+1];
+				f[Q*pos+4] = ftemp[Q*pos+2];
+				f[Q*pos+5] = ftemp[Q*pos+7];
+				f[Q*pos+6] = ftemp[Q*pos+8];
+				f[Q*pos+7] = ftemp[Q*pos+5];
+				f[Q*pos+8] = ftemp[Q*pos+6];
+			}
+		}
+	}
+
+}
+
 /* -------------------------------------------------------------------------
 function that checks the density
 --------------------------------------------------------------------------*/
@@ -701,7 +1153,7 @@ bool check_density(vector<double>& density, vector<double>& ux, vector<double>&u
 
 //function that initializes the pml
 
-bool update_pml(vector<double>& pml,vector<bool>& pml_rect, bool with_x){
+bool update_pml(vector<double>& pml, bool with_x){
 
 	int pos;
 
@@ -709,51 +1161,37 @@ bool update_pml(vector<double>& pml,vector<bool>& pml_rect, bool with_x){
 		for(int y = 0; y<ly;y++){
 			
 			pos = x + y*ly;
-			pml_rect[pos] = false;
-			pml[pos] = 1.;
+			
+			pml[pos] = 0.;
 			if(thickness_pml>0){
 				if(y<thickness_pml){
-					if(y>thickness_pml-10){
-						pml_rect[pos] = true;
-					}
-					pml[pos] = 0.95;
-					pml[pos] = 0.9/thickness_pml * y + 0.1;
+					pml[pos] = sigma_max*double(std::pow(thickness_pml-y,2))/double(std::pow(thickness_pml,2));
 				}
 				if(y>ly-thickness_pml){
-					if(y<ly-thickness_pml+10){
-						pml_rect[pos] = true;
-					}
-					pml[pos] = 0.95;
-					pml[pos] = -0.9/thickness_pml * y + (0.1 + 0.9/thickness_pml * ly); 
+					pml[pos] = sigma_max*double(std::pow(thickness_pml- (ly-y),2))/double(std::pow(thickness_pml,2)); 
 				}
 				if(x> lx-thickness_pml){
-					if(x<lx-thickness_pml+10){
-						pml_rect[pos] = true;
-					}
-					pml[pos] = 0.95;
-					pml[pos] = -0.9/thickness_pml * x + (0.1 + 0.9/thickness_pml * lx);
+					pml[pos] = sigma_max*double(std::pow(thickness_pml - (lx-x),2))/double(std::pow(thickness_pml,2));
 				}
 				//check the corners
 				if((y<thickness_pml)&&(x> lx-thickness_pml)){
 					pml[pos] = 0.95;
-					pml[pos] = 0.5*(0.9/thickness_pml * y + 0.1 + -0.9/thickness_pml * x + (0.1 + 0.9/thickness_pml * lx));
+					pml[pos] = sigma_max*0.5*(double(std::pow(thickness_pml-y,2))/double(std::pow(thickness_pml,2)) + double(std::pow(thickness_pml - (lx-x),2))/double(std::pow(thickness_pml,2)));
+				}
+				if((y>ly-thickness_pml)&&(x> lx-thickness_pml)){
+					pml[pos] = 0.5*sigma_max*(double(std::pow(thickness_pml- (ly-y),2))/double(std::pow(thickness_pml,2)) + double(std::pow(thickness_pml - (lx-x),2))/double(std::pow(thickness_pml,2)));
 				}
 				if((y<thickness_pml)&&(x<thickness_pml)){
 					pml[pos] = 0.95;
-					pml[pos] = 0.5*(0.9/thickness_pml * y + 0.1 + 0.9/thickness_pml * x + 0.1);
-				}
-				if((y>ly-thickness_pml)&&(x> lx-thickness_pml)){
-					pml[pos] = 0.95;
-					pml[pos] = 0.5*(-0.9/thickness_pml * y + (0.1 + 0.9/thickness_pml * ly) -0.9/thickness_pml * x + (0.1 + 0.9/thickness_pml * lx) );
+					pml[pos] = 0.5*sigma_max*(double(std::pow(thickness_pml-y,2))/double(std::pow(thickness_pml,2)) + double(std::pow(thickness_pml-x,2))/double(std::pow(thickness_pml,2)));
 				}
 				if((y>ly-thickness_pml)&&(x<thickness_pml)){
 					pml[pos] = 0.95;
-					pml[pos] = 0.5*(0.9/thickness_pml * x + 0.1 -0.9/thickness_pml * y + (0.1 + 0.9/thickness_pml * ly) );
+					pml[pos] = 0.5*sigma_max*(double(std::pow(thickness_pml-x,2))/double(std::pow(thickness_pml,2)) + double(std::pow(thickness_pml- (ly-y),2))/double(std::pow(thickness_pml,2)));
 				}
 				if(with_x){
-					if(x<thickness_pml && x>10){
-						pml[pos] = 0.95;
-						pml[pos] = 0.9/thickness_pml * y + 0.7;
+					if(x<thickness_pml ){
+						pml[pos] = sigma_max*double(std::pow(thickness_pml-x,2))/double(std::pow(thickness_pml,2));
 					}
 					/*if((y>ly-thickness_pml)&&(x<thickness_pml)){
 						pml[pos] = 0.95;

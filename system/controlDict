@@ -22,8 +22,9 @@ DENSIT0  1
 UY0      10
 KINVISC  0.05
 RE       100.0
-DT_WRIT  50
-DT_DENS  50
-TH_PML   0
+DT_WRIT  30
+DT_DENS  30
+TH_PML   50
+SIGMA_MAX 0.005
 T_PUSH   150
-GEOFILE  ./system/k_obs_larger
+GEOFILE  ./system/k_obs
