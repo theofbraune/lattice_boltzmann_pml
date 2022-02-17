@@ -67,10 +67,11 @@ bool propagation(vector<double>&, vector<double>&);
 bool pml_advection(vector<double>&, const vector<double>&);
 bool boundary(double, vector<double>&, vector<double>&, vector<bool>&);
 void boundary_stable_fluid(double, const vector<double>&, const vector<double>& , const vector<double>&, const vector<bool>&, vector<double>&, vector<double>& );
-bool calc_macr_quantities(vector<double>&, vector<double>&, vector<double>&, vector<double>&,const vector<double>&, vector<bool>&);
+bool calc_macr_quantities(vector<double>&, vector<double>&, vector<double>&, const vector<double>&,const vector<double>&, vector<bool>&);
 bool collision_srt(vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<bool>&, double);
 bool update_pml(vector<double>&, bool);
 void collision_pml(const vector<double>&,const vector<double>&, const vector<double>&,const vector<double>&, const vector<bool>&, vector<double>&, vector<double>& );
+void equilibrium_correction(const vector<double>&, const vector<double>&, const vector<double>&, const vector<double>&, const vector<bool>&, vector<double>&);
 
 
 int main(void)
@@ -131,14 +132,16 @@ int main(void)
 
 		
 		propagation(f, ftemp);  // LHS of Boltzmann equation
-		//boundary(ux0, f, ftemp, obst);	// boundary conditions
-		boundary_stable_fluid(ux0,density,ux,uy,obst,f,ftemp);
+		boundary(ux0, f, ftemp, obst);	// boundary conditions
+		//boundary_stable_fluid(ux0,density,ux,uy,obst,f,ftemp);
 		//pml_advection(ftemp,pml);
 		calc_macr_quantities(density, ux, uy, ftemp,pml, obst); // calculation of macroscopic quantities
+		
 		collision_srt(density, ux, uy, f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
 		//collision_mrt(f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
 		//collision_pml(density, ux, uy, pml, obst, f_eq_old, f);
-
+		//calc_macr_quantities(density, ux, uy, ftemp,pml, obst);
+		//equilibrium_correction(pml,density,ux,uy,obst,f);
 
 		// io stuff
 		if (t%dt_density==0)
@@ -269,7 +272,7 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 	strcpy(fileresults,file_m.c_str());
 	fp=fopen(fileresults, "w+");
 	fprintf(fp, "x\ty\tux\tuy\tpress\trho\tobsval\n");
-	bool save_compressed_for_reference = false;
+	bool save_compressed_for_reference = true;
 	
 
 	if(save_compressed_for_reference){
@@ -607,7 +610,7 @@ bool boundary(double ux0, vector<double>& f, vector<double>& ftemp, vector<bool>
 /* -------------------------------------------------------------------------
 function that calculates the macroscopic quantities
 --------------------------------------------------------------------------*/
-bool calc_macr_quantities(vector<double>& density, vector<double>& ux, vector<double>& uy, vector<double>& ftemp, const vector<double>& pml, vector<bool>& obst)
+bool calc_macr_quantities(vector<double>& density, vector<double>& ux, vector<double>& uy, const vector<double>& ftemp, const vector<double>& pml, vector<bool>& obst)
 {
 	int x,y,pos,i;
 	double density_loc,ux_loc,uy_loc;
@@ -821,9 +824,9 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 		// vf=ux0*3./2.*(2.*y/(ly-1)-(1.*y/(ly-1))*(1.*y/(ly-1))); // Nusselt's velocity profile
 		if(time_step<time_push){
 			//here specify the size of the outlet, resp the blast.
-			//if((y>5.5*thickness_pml) && (y<lx-5.5*thickness_pml)){ //good for pml 50 and size 600
+			if((y>(5.5*50.)) && (y<double(ly)-(5.5*50.))){ //good for pml 50 and size 600
 			//if((y>975) && (y<1025)){
-			if(true){
+			//if(true){
 				
 				vf = ux0;
 				ru=(ftemp[Q*pos+0]+ftemp[Q*pos+2]+ftemp[Q*pos+4]+2.*(ftemp[Q*pos+3]+ftemp[Q*pos+6]+ftemp[Q*pos+7]))/(1.-vf)*vf;
@@ -1149,6 +1152,44 @@ bool check_density(vector<double>& density, vector<double>& ux, vector<double>&u
 	printf("%11d\t% .5f %%\t%.8f", t, (intdensity-intdensity0)/intdensity0*100., ma);
 	cout << endl;
 	return(0);
+}
+
+/*-------------------------------------------------------------------------
+function that performes the equilibrium correction before the collision step.
+-------------------------------------------------------------------------*/
+
+void equilibrium_correction(const vector<double>& pml, const vector<double>& density, const vector<double>& ux, const vector<double>& uy, const vector<bool>& obst, vector<double>& ftemp){
+	int x,y,pos,i;
+	double density_loc, ux_loc, uy_loc, u2;
+	double check_f, check_ftemp;
+	double feq[Q];
+
+	for (x=0; x<lx;x++){
+		for(y = 0; y<ly; y++){
+			pos=x+lx*y;
+			//check whether we are in the pml area.
+			if((pml[pos]>0.)&&(!obst[pos])){
+				if((x==563)&&(y==37)){
+					//std::cout<<" Value of the PML at this point: "<<pml[pos]<<std::endl;
+				}
+				density_loc=density[pos];
+				ux_loc=ux[pos];
+				uy_loc=uy[pos];
+				u2=ux_loc*ux_loc+uy_loc*uy_loc; // square of velocity
+				//loop over the different velocity directions.
+				for (i=0; i<Q; ++i)
+				{
+					// calculating equilibrium distribution, e. (2)
+					feq[i]=density_loc*rt[i]*(1. + (ex[i]*ux_loc+ey[i]*uy_loc)/cs2 + (ex[i]*ux_loc+ey[i]*uy_loc)*(ex[i]*ux_loc+ey[i]*uy_loc)/(2.*cs2*cs2) - u2/(2.*cs2));
+					//adjust the temporary density by this value.
+					ftemp[Q*pos+i]+=pml[pos]*feq[i];
+					ftemp[Q*pos+i]*=1./(1.+pml[pos]);
+				}
+
+			}
+		}
+	}
+
 }
 
 //function that initializes the pml
