@@ -66,7 +66,7 @@ bool check_density(vector<double>&, vector<double>&, vector<double>&, int, doubl
 bool propagation(vector<double>&, vector<double>&);
 bool pml_advection(vector<double>&, const vector<double>&);
 bool boundary(double, vector<double>&, vector<double>&, vector<bool>&);
-void boundary_stable_fluid(double, const vector<double>&, const vector<double>& , const vector<double>&, const vector<bool>&, vector<double>&, vector<double>& );
+void boundary_stable_fluid(double, const vector<double>&, const vector<double>& , const vector<double>&,const vector<double>& , const vector<double>&, const vector<bool>&, vector<double>&, vector<double>& );
 bool calc_macr_quantities(vector<double>&, vector<double>&, vector<double>&, const vector<double>&,const vector<double>&, vector<bool>&);
 bool collision_srt(vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<double>&, vector<bool>&, double);
 bool update_pml(vector<double>&, bool);
@@ -105,6 +105,8 @@ int main(void)
 	vector<double> density(lx*ly); // mass density
 	vector<double> ux(lx*ly); // x-velocity
 	vector<double> uy(lx*ly); // y-velocity
+	vector<double> ux_old(lx*ly); // x-velocity from the step before
+	vector<double> uy_old(lx*ly); // y-velocity from the step before
 
 	vector<double> pml(lx*ly); //pml damping value. usually called sigma
 	vector<double> f_eq_old(Q*lx*ly);//save the old equilibrium state.
@@ -121,26 +123,31 @@ int main(void)
 	3. Numerics
 	--------------------------------------------------------------------------*/
 	cout << "starting numerics..." << endl;
+	ux_old = ux;
+	uy_old = uy;
 
 	for (t=t_0; t<t_max+1; ++t)
 	{
 		time_step +=1;
 		//set the pml also to the left side.
+		
 		if(time_step==950){
 			//update_pml(pml,true);
 		}
 
 		
 		propagation(f, ftemp);  // LHS of Boltzmann equation
-		boundary(ux0, f, ftemp, obst);	// boundary conditions
-		//boundary_stable_fluid(ux0,density,ux,uy,obst,f,ftemp);
+		//boundary(ux0, f, ftemp, obst);	// boundary conditions
+		boundary_stable_fluid(ux0,density,ux,uy,ux_old,uy_old,obst,f,ftemp);
 		//pml_advection(ftemp,pml);
+		ux_old = ux;
+		uy_old = uy;
 		calc_macr_quantities(density, ux, uy, ftemp,pml, obst); // calculation of macroscopic quantities
 		
 		collision_srt(density, ux, uy, f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
 		//collision_mrt(f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
 		//collision_pml(density, ux, uy, pml, obst, f_eq_old, f);
-		//calc_macr_quantities(density, ux, uy, ftemp,pml, obst);
+		calc_macr_quantities(density, ux, uy, f,pml, obst);
 		//equilibrium_correction(pml,density,ux,uy,obst,f);
 
 		// io stuff
@@ -272,7 +279,7 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 	strcpy(fileresults,file_m.c_str());
 	fp=fopen(fileresults, "w+");
 	fprintf(fp, "x\ty\tux\tuy\tpress\trho\tobsval\n");
-	bool save_compressed_for_reference = true;
+	bool save_compressed_for_reference = false;
 	
 
 	if(save_compressed_for_reference){
@@ -281,6 +288,7 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 			for (x=0; x<lx; ++x)
 			{
 				pos=x+lx*y;
+				//these values are for a 2000 x 2000 box.
 				if((x<600)&&((y>699)&&(y<1300))){
 					if(x==33 && y==1000){
 						std::cout<<" The values are: "<< double(x)<<" "<< double(y)<<" "<< ux[pos]<<" "<< uy[pos]<<std::endl;
@@ -465,8 +473,8 @@ bool boundary(double ux0, vector<double>& f, vector<double>& ftemp, vector<bool>
 // 		vf=ux0*3./2.*(2.*y/(ly-1)-(1.*y/(ly-1))*(1.*y/(ly-1))); // Nusselt's velocity profile
 		if(time_step<time_push){
 			//here specify the size of the outlet, resp the blast.
-			//if((y>5.5*thickness_pml) && (y<lx-5.5*thickness_pml)){ //good for pml 50
-			if((y>975) && (y<1025)){ //inlet for the simulation on the reference solution
+			if((y>5.5*thickness_pml) && (y<lx-5.5*thickness_pml)){ //good for pml 50
+			//if((y>975) && (y<1025)){ //inlet for the simulation on the reference solution
 				
 				vf = ux0;
 				ru=(ftemp[Q*pos+0]+ftemp[Q*pos+2]+ftemp[Q*pos+4]+2.*(ftemp[Q*pos+3]+ftemp[Q*pos+6]+ftemp[Q*pos+7]))/(1.-vf)*vf;
@@ -807,10 +815,12 @@ void collision_pml(const vector<double>& density,const vector<double>& ux,const 
 /*-------------------------------------------------------------------------
 function that performes the stable fluid boundary treatment
 -------------------------------------------------------------------------*/
-void boundary_stable_fluid(double ux0, const vector<double>& density, const vector<double>& ux, const vector<double>& uy, const vector<bool>& obst, vector<double>& f, vector<double>& ftemp ){
+void boundary_stable_fluid(double ux0, const vector<double>& density, const vector<double>& ux, const vector<double>& uy,const vector<double>& ux_old, const vector<double>& uy_old, const vector<bool>& obst, vector<double>& f, vector<double>& ftemp ){
 	int x,y,i;
 	int pos;
 	double vf, ru, density_loc;
+	bool euler= true;
+	bool rk4=false;
 
 	//first consider left inlet
 	x=0; // velocity inlet at top of the domain, Zou and He
@@ -854,13 +864,91 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 		pos=x+y*lx;
 		double ux_loc, uy_loc;
 		double x_back, y_back, ux_back, uy_back, rho_back, u2_back;
+		double k1x,k2x,k3x,k4x,k1y,k2y,k3y,k4y;
 		int x_left, x_right, y_up, y_down;
 		double ux_down, ux_up, uy_down, uy_up, rho_down, rho_up;
 		ux_loc = ux[pos];
 		uy_loc = uy[pos];
 		//Euler Step for backtracking
-		x_back = (double(x) - delta_t*ux_loc);
-		y_back = double(y) - delta_t*uy_loc;
+		if(euler){
+			x_back = (double(x) - delta_t*ux_loc);
+			y_back = double(y) - delta_t*uy_loc;
+		}else if(rk4){
+			k1x = ux[pos];
+			k1y = uy[pos];
+			//compute half a backward step
+			double x_half_back = x - 0.5*k1x; 
+			double y_half_back = y - 0.5*k1y;
+			if(((x_half_back >= 0.)&&(x_half_back<double(lx-1)))&&((y_half_back>=0.)&&(y_half_back<double(ly-1)))){
+				//here hidden error
+				x_left = trunc(x_half_back);
+				x_right = x_left+1;
+				y_down = trunc(y_half_back);
+				y_up = y_down+1;
+				
+				//bilinear interpolation of the quantities
+				ux_down = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				ux_up = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				k2x = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+				
+				uy_down = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] )+ (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				uy_up = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] ) + (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				k2y = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+			}else{
+				k2x = ux[pos];
+				k2y = uy[pos];
+			}
+
+			x_half_back = x - 0.5*k1x;
+			y_half_back = y - 0.5*k1y;
+			if(((x_half_back >= 0.)&&(x_half_back<double(lx-1)))&&((y_half_back>=0.)&&(y_half_back<double(ly-1)))){
+				//here hidden error
+				x_left = trunc(x_half_back);
+				x_right = x_left+1;
+				y_down = trunc(y_half_back);
+				y_up = y_down+1;
+				
+				//bilinear interpolation of the quantities
+				ux_down = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				ux_up = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				k3x = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+				
+				uy_down = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] )+ (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				uy_up = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] ) + (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				k3y = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+			}else{
+				k3x = ux[pos];
+				k3y = uy[pos];
+			}
+
+			x_back = x - k3x;
+			y_back = y - k3y;
+			if(((x_back >= 0.)&&(x_back<double(lx-1)))&&((y_back>=0.)&&(y_back<double(ly-1)))){
+				//here hidden error
+				x_left = trunc(x_back);
+				x_right = x_left+1;
+				y_down = trunc(y_back);
+				y_up = y_down+1;
+				
+				//bilinear interpolation of the quantities
+				ux_down = (double(x_right)-x_back)*ux_old[x_right + y_down*ly] + (x_back - double(x_left))*ux_old[x_right + y_down*ly];
+				ux_up = (double(x_right)-x_back)*ux_old[x_right + y_down*ly] + (x_back - double(x_left))*ux_old[x_right + y_down*ly];
+				k4x = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+				
+				uy_down = (double(x_right)-x_back)*uy_old[x_right + y_down*ly] + (x_back - double(x_left))*uy_old[x_right + y_down*ly] ;
+				uy_up = (double(x_right)-x_back)*uy_old[x_right + y_down*ly]  + (x_back - double(x_left))*uy_old[x_right + y_down*ly] ;
+				k4y = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+			}else{
+				k4x = ux[pos];
+				k4y = uy[pos];
+			}
+
+			//now take the 4 values to estimate the better backtracking position
+			x_back = (k1x + 2*k2x + 2*k3x + k4x)/6.;
+			y_back = (k1y + 2*k2y + 2*k3y + k4y)/6.;
+
+
+		}
 		//check if we are in the physical domain
 		if(x==90){
 			
@@ -871,6 +959,7 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 			*/
 		}
 
+		//check that we do not leave the physical domain
 		if(((x_back >= 0.)&&(x_back<double(lx-1)))&&((y_back>=0.)&&(y_back<double(ly-1)))){
 			//here hidden error
 			x_left = trunc(x_back);
@@ -897,6 +986,28 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 			ftemp[Q*pos + 8] = rho_back*rt[8]*(1. + (ex[8]*ux_back+ey[8]*uy_back)/cs2 + (ex[8]*ux_back+ey[8]*uy_back)*(ex[8]*ux_back+ey[8]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			ftemp[Q*pos + 4] = rho_back*rt[4]*(1. + (ex[4]*ux_back+ey[4]*uy_back)/cs2 + (ex[4]*ux_back+ey[4]*uy_back)*(ex[4]*ux_back+ey[4]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			ftemp[Q*pos + 7] = rho_back*rt[7]*(1. + (ex[7]*ux_back+ey[7]*uy_back)/cs2 + (ex[7]*ux_back+ey[7]*uy_back)*(ex[7]*ux_back+ey[7]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			bool transport_difference = true;
+			if(transport_difference){
+				double f8_up,f8_down,f8_back;
+				double f4_up,f4_down,f4_back;
+				double f7_up,f7_down,f7_back;
+				f4_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+4] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+4 ];
+				f4_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+4] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+4 ];
+				f4_back = (double(y_up) - y_back)*f4_up + (y_back - double(y_down))*f4_down;
+
+				f8_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+8] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+8 ];
+				f8_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+8] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+8 ];
+				f8_back = (double(y_up) - y_back)*f8_up + (y_back - double(y_down))*f8_down;
+
+				f7_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+7] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+7];
+				f7_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+7] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+7 ];
+				f7_back = (double(y_up) - y_back)*f7_up + (y_back - double(y_down))*f7_down;
+
+				ftemp[Q*pos + 8] = f8_back;
+				ftemp[Q*pos + 4] = f4_back;
+				ftemp[Q*pos + 7] = f7_back;
+
+			}
 
 			//std::cout<<"time: "<<time_step<<" We are inside the domain"<<std::endl;
 		}else{//case when we leave the domain. In this case just take the former value.
@@ -925,13 +1036,91 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 		pos=x+y*lx;
 		double ux_loc, uy_loc;
 		double x_back, y_back, ux_back, uy_back, rho_back, u2_back;
+		double k1x,k2x,k3x,k4x,k1y,k2y,k3y,k4y;
 		int x_left, x_right, y_up, y_down;
 		double ux_down, ux_up, uy_down, uy_up, rho_down, rho_up;
 		ux_loc = ux[pos];
 		uy_loc = uy[pos];
 		//Euler Step for backtracking
-		x_back = double(x) - delta_t*ux_loc;
-		y_back = double(y) - delta_t*uy_loc;
+		if(euler){
+			x_back = double(x) - delta_t*ux_loc;
+			y_back = double(y) - delta_t*uy_loc;
+		}else if(rk4){
+			k1x = ux[pos];
+			k1y = uy[pos];
+			//compute half a backward step
+			double x_half_back = x - 0.5*k1x; 
+			double y_half_back = y - 0.5*k1y;
+			if(((x_half_back >= 0.)&&(x_half_back<double(lx-1)))&&((y_half_back>=0.)&&(y_half_back<double(ly-1)))){
+				//here hidden error
+				x_left = trunc(x_half_back);
+				x_right = x_left+1;
+				y_down = trunc(y_half_back);
+				y_up = y_down+1;
+				
+				//bilinear interpolation of the quantities
+				ux_down = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				ux_up = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				k2x = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+				
+				uy_down = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] )+ (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				uy_up = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] ) + (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				k2y = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+			}else{
+				k2x = ux[pos];
+				k2y = uy[pos];
+			}
+
+			x_half_back = x - 0.5*k1x;
+			y_half_back = y - 0.5*k1y;
+			if(((x_half_back >= 0.)&&(x_half_back<double(lx-1)))&&((y_half_back>=0.)&&(y_half_back<double(ly-1)))){
+				//here hidden error
+				x_left = trunc(x_half_back);
+				x_right = x_left+1;
+				y_down = trunc(y_half_back);
+				y_up = y_down+1;
+				
+				//bilinear interpolation of the quantities
+				ux_down = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				ux_up = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				k3x = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+				
+				uy_down = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] )+ (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				uy_up = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] ) + (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				k3y = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+			}else{
+				k3x = ux[pos];
+				k3y = uy[pos];
+			}
+
+			x_back = x - k3x;
+			y_back = y - k3y;
+			if(((x_back >= 0.)&&(x_back<double(lx-1)))&&((y_back>=0.)&&(y_back<double(ly-1)))){
+				//here hidden error
+				x_left = trunc(x_back);
+				x_right = x_left+1;
+				y_down = trunc(y_back);
+				y_up = y_down+1;
+				
+				//bilinear interpolation of the quantities
+				ux_down = (double(x_right)-x_back)*ux_old[x_right + y_down*ly] + (x_back - double(x_left))*ux_old[x_right + y_down*ly];
+				ux_up = (double(x_right)-x_back)*ux_old[x_right + y_down*ly] + (x_back - double(x_left))*ux_old[x_right + y_down*ly];
+				k4x = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+				
+				uy_down = (double(x_right)-x_back)*uy_old[x_right + y_down*ly] + (x_back - double(x_left))*uy_old[x_right + y_down*ly] ;
+				uy_up = (double(x_right)-x_back)*uy_old[x_right + y_down*ly]  + (x_back - double(x_left))*uy_old[x_right + y_down*ly] ;
+				k4y = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+			}else{
+				k4x = ux[pos];
+				k4y = uy[pos];
+			}
+
+			//now take the 4 values to estimate the better backtracking position
+			x_back = (k1x + 2*k2x + 2*k3x + k4x)/6.;
+			y_back = (k1y + 2*k2y + 2*k3y + k4y)/6.;
+
+
+		}
 		//check if we are in the physical domain
 		/*
 		std::cout<< "delta t "<<delta_t<<std::endl;
@@ -965,7 +1154,28 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 			ftemp[Q*pos + 6] = rho_back*rt[6]*(1. + (ex[6]*ux_back+ey[6]*uy_back)/cs2 + (ex[6]*ux_back+ey[6]*uy_back)*(ex[6]*ux_back+ey[6]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			ftemp[Q*pos + 2] = rho_back*rt[2]*(1. + (ex[2]*ux_back+ey[2]*uy_back)/cs2 + (ex[2]*ux_back+ey[2]*uy_back)*(ex[2]*ux_back+ey[2]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			ftemp[Q*pos + 5] = rho_back*rt[5]*(1. + (ex[5]*ux_back+ey[5]*uy_back)/cs2 + (ex[5]*ux_back+ey[5]*uy_back)*(ex[5]*ux_back+ey[5]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			bool transport_difference = true;
+			if(transport_difference){
+				double f6_up,f6_down,f6_back;
+				double f2_up,f2_down,f2_back;
+				double f5_up,f5_down,f5_back;
+				f2_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+2] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+2 ];
+				f2_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+2] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+2 ];
+				f2_back = (double(y_up) - y_back)*f2_up + (y_back - double(y_down))*f2_down;
 
+				f6_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+6] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+6 ];
+				f6_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+6] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+6 ];
+				f6_back = (double(y_up) - y_back)*f6_up + (y_back - double(y_down))*f6_down;
+
+				f5_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+5] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+5];
+				f5_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+5] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+5 ];
+				f5_back = (double(y_up) - y_back)*f5_up + (y_back - double(y_down))*f5_down;
+
+				ftemp[Q*pos + 6] = f6_back;
+				ftemp[Q*pos + 2] = f2_back;
+				ftemp[Q*pos + 5] = f5_back;
+
+			}
 			//std::cout<<"time: "<<time_step<<" We are inside the domain"<<std::endl;
 		}else{//case when we leave the domain. In this case just take the former value.
 			/*
@@ -990,13 +1200,91 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 		//define local and interpolated quantities.
 		double ux_loc, uy_loc;
 		double x_back, y_back, ux_back, uy_back, rho_back, u2_back;
+		double k1x,k2x,k3x,k4x,k1y,k2y,k3y,k4y;
 		int x_left, x_right, y_up, y_down;
 		double ux_down, ux_up, uy_down, uy_up, rho_down, rho_up;
 		ux_loc = ux[pos];
 		uy_loc = uy[pos];
 		//Euler Step for backtracking
-		x_back = double(x) - delta_t*ux_loc;
-		y_back = double(y) - delta_t*uy_loc;
+		if(euler){
+			x_back = double(x) - delta_t*ux_loc;
+			y_back = double(y) - delta_t*uy_loc;
+		}else if(rk4){
+			k1x = ux[pos];
+			k1y = uy[pos];
+			//compute half a backward step
+			double x_half_back = x - 0.5*k1x; 
+			double y_half_back = y - 0.5*k1y;
+			if(((x_half_back >= 0.)&&(x_half_back<double(lx-1)))&&((y_half_back>=0.)&&(y_half_back<double(ly-1)))){
+				//here hidden error
+				x_left = trunc(x_half_back);
+				x_right = x_left+1;
+				y_down = trunc(y_half_back);
+				y_up = y_down+1;
+				
+				//bilinear interpolation of the quantities
+				ux_down = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				ux_up = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				k2x = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+				
+				uy_down = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] )+ (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				uy_up = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] ) + (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				k2y = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+			}else{
+				k2x = ux[pos];
+				k2y = uy[pos];
+			}
+
+			x_half_back = x - 0.5*k1x;
+			y_half_back = y - 0.5*k1y;
+			if(((x_half_back >= 0.)&&(x_half_back<double(lx-1)))&&((y_half_back>=0.)&&(y_half_back<double(ly-1)))){
+				//here hidden error
+				x_left = trunc(x_half_back);
+				x_right = x_left+1;
+				y_down = trunc(y_half_back);
+				y_up = y_down+1;
+				
+				//bilinear interpolation of the quantities
+				ux_down = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				ux_up = (double(x_right)-x_back)*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]) + (x_back - double(x_left))*0.5*(ux[x_right + y_down*ly]+ux_old[x_right + y_down*ly]);
+				k3x = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+				
+				uy_down = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] )+ (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				uy_up = (double(x_right)-x_back)*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] ) + (x_back - double(x_left))*0.5*(uy[x_right + y_down*ly]+uy_old[x_right + y_down*ly] );
+				k3y = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+			}else{
+				k3x = ux[pos];
+				k3y = uy[pos];
+			}
+
+			x_back = x - k3x;
+			y_back = y - k3y;
+			if(((x_back >= 0.)&&(x_back<double(lx-1)))&&((y_back>=0.)&&(y_back<double(ly-1)))){
+				//here hidden error
+				x_left = trunc(x_back);
+				x_right = x_left+1;
+				y_down = trunc(y_back);
+				y_up = y_down+1;
+				
+				//bilinear interpolation of the quantities
+				ux_down = (double(x_right)-x_back)*ux_old[x_right + y_down*ly] + (x_back - double(x_left))*ux_old[x_right + y_down*ly];
+				ux_up = (double(x_right)-x_back)*ux_old[x_right + y_down*ly] + (x_back - double(x_left))*ux_old[x_right + y_down*ly];
+				k4x = (double(y_up) - y_back)*ux_up + (y_back - double(y_down))*ux_down;
+				
+				uy_down = (double(x_right)-x_back)*uy_old[x_right + y_down*ly] + (x_back - double(x_left))*uy_old[x_right + y_down*ly] ;
+				uy_up = (double(x_right)-x_back)*uy_old[x_right + y_down*ly]  + (x_back - double(x_left))*uy_old[x_right + y_down*ly] ;
+				k4y = (double(y_up) - y_back)*uy_up + (y_back - double(y_down))*uy_down;
+			}else{
+				k4x = ux[pos];
+				k4y = uy[pos];
+			}
+
+			//now take the 4 values to estimate the better backtracking position
+			x_back = (k1x + 2*k2x + 2*k3x + k4x)/6.;
+			y_back = (k1y + 2*k2y + 2*k3y + k4y)/6.;
+
+
+		}
 		//check if we are in the physical domain
 		/*
 		std::cout<< "delta t "<<delta_t<<std::endl;
@@ -1030,7 +1318,28 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 			ftemp[Q*pos + 6] = rho_back*rt[6]*(1. + (ex[6]*ux_back+ey[6]*uy_back)/cs2 + (ex[6]*ux_back+ey[6]*uy_back)*(ex[6]*ux_back+ey[6]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			ftemp[Q*pos + 3] = rho_back*rt[3]*(1. + (ex[3]*ux_back+ey[3]*uy_back)/cs2 + (ex[3]*ux_back+ey[3]*uy_back)*(ex[3]*ux_back+ey[3]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			ftemp[Q*pos + 7] = rho_back*rt[7]*(1. + (ex[7]*ux_back+ey[7]*uy_back)/cs2 + (ex[7]*ux_back+ey[7]*uy_back)*(ex[7]*ux_back+ey[7]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			bool transport_difference = true;
+			if(transport_difference){
+				double f6_up,f6_down,f6_back;
+				double f3_up,f3_down,f3_back;
+				double f7_up,f7_down,f7_back;
+				f3_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+3] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+3 ];
+				f3_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+3] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+3 ];
+				f3_back = (double(y_up) - y_back)*f3_up + (y_back - double(y_down))*f3_down;
 
+				f6_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+6] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+6 ];
+				f6_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+6] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+6 ];
+				f6_back = (double(y_up) - y_back)*f6_up + (y_back - double(y_down))*f6_down;
+
+				f7_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+7] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+7];
+				f7_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+7] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+7 ];
+				f7_back = (double(y_up) - y_back)*f7_up + (y_back - double(y_down))*f7_down;
+
+				ftemp[Q*pos + 6] = f6_back;
+				ftemp[Q*pos + 3] = f3_back;
+				ftemp[Q*pos + 7] = f7_back;
+
+			}
 			//std::cout<<"time: "<<time_step<<" We are inside the domain"<<std::endl;
 		}else{//case when we leave the domain. In this case just take the former value.
 			/*

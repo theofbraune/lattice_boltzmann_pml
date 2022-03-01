@@ -10,8 +10,8 @@ import pandas as pd
 #table = ssv.loadf('0030_m.ssv')
 for index in range(0,3300,30):
     step_string = "%04d" % (index,)
-    data1 = pd.read_csv('../result_collection/stable_fluid_boundary/result_reference_normal_push/'+step_string+'_m.ssv',sep='\t')
-    data2 = pd.read_csv('../result_collection/stable_fluid_boundary/result_stable_fluid_bdy/'+step_string+'_m.ssv',sep='\t')
+    data1 = pd.read_csv('../result_collection/pml_with_stable_fluid/reference_solution_rocket_push_950/'+step_string+'_m.ssv',sep='\t')
+    data2 = pd.read_csv('../result_collection/pml_with_stable_fluid/pml_50_push_950/'+step_string+'_m.ssv',sep='\t')
 
     vx1 = data1["ux"]
     vy1 = data1["uy"]
@@ -66,7 +66,7 @@ for index in range(0,3300,30):
 
     plt.title("Plot of the difference after "+step_string+" time steps.\n The maximal error is: "+str(err))
     plt.pcolormesh(X,Y,diff,cmap= cm.plasma)
-    plt.savefig("../result_collection/stable_fluid_boundary/result_difference_stable_fluid/difference_step_"+step_string+".png")
+    plt.savefig("../result_collection/pml_with_stable_fluid/difference_rocket/difference_step_"+step_string+".png")
     #pdb.set_trace()
 
 
