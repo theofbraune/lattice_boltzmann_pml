@@ -42,18 +42,18 @@ try:
 			for y in range(0,height):
 				dot=pix[x,y]
 				#print('dot value: ', dot)
-				#dot//=255
+				dot//=255
 				if (dot == 0) or (dot == 1):
 					"""
 					flip vertically: obstacle coordinates start
 					at bottom, image coordinates at top
 					"""
 					if(dot==0):
-						#dot = 1
-						pass
+						dot = 1
+						#pass
 					else:
-						#dot=0
-						pass
+						dot=0
+						#pass
 					out.append("%s %s %s"%(x,height-y-1,dot))
 				else:
 					print('dot: ', dot)
