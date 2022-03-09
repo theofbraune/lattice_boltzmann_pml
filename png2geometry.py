@@ -28,8 +28,11 @@ try:
 	else:
 		print("Converting PNG to monochrome BMP file.")
 		pngfile=sys.argv[1]
+		
 		bmpfile=pngfile.replace("png","bmp")
 		geofile=pngfile.replace(".png","")
+		print('png: ', pngfile)
+		print('bmp: ',bmpfile)
 		os.system("convert -monochrome %s %s" %(pngfile, bmpfile))
 		print("Reading BMP file.")
 		im=Image.open(bmpfile)
