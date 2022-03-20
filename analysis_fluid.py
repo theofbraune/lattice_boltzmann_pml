@@ -15,7 +15,7 @@ for index in tqdm(range(0,3000,30)):
 
     step_string = "%04d" % (index,)
     data1 = pd.read_csv('../result_collection/rocket_reflection_top_bottom/reference_solution_rocket_4000_600_push_700/'+step_string+'_m.ssv',sep='\t')
-    data2 = pd.read_csv('../result_collection/rocket_reflection_top_bottom/first_order_moments/reference_800_600_push_700/'+step_string+'_m.ssv',sep='\t')
+    data2 = pd.read_csv('../result_collection/rocket_reflection_top_bottom/backtracking_of_error/reference_1500_600_push_700/'+step_string+'_m.ssv',sep='\t')
 
     vx1 = data1["ux"]
     vy1 = data1["uy"]

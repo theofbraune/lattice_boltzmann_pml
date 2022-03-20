@@ -27,4 +27,4 @@ DT_DENS  30
 TH_PML   50
 SIGMA_MAX 10000.00
 T_PUSH   700
-GEOFILE  ./system/rocket_2000_600
+GEOFILE  ./system/rocket_1500_600

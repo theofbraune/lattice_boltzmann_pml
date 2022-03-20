@@ -280,7 +280,7 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 	fp=fopen(fileresults, "w+");
 	fprintf(fp, "x\ty\tux\tuy\tpress\trho\tobsval\n");
 	bool save_compressed_for_reference = false;//this parameter allows to save the data on the domain of interest
-	bool save_semi_compressed = false;
+	bool save_semi_compressed = true;
 
 	if(save_compressed_for_reference){
 		for (y=0; y<ly; ++y)
