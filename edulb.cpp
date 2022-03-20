@@ -280,7 +280,7 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 	fp=fopen(fileresults, "w+");
 	fprintf(fp, "x\ty\tux\tuy\tpress\trho\tobsval\n");
 	bool save_compressed_for_reference = false;//this parameter allows to save the data on the domain of interest
-	bool save_semi_compressed = true;
+	bool save_semi_compressed = false;
 
 	if(save_compressed_for_reference){
 		for (y=0; y<ly; ++y)
@@ -1494,30 +1494,34 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 			u2_back = ux_back*ux_back + uy_back*uy_back;
 			//use these quantities for the equilibrium distribution
 			//rho_back*rt[i]*(1. + (ex[i]*ux[pos]+ey[i]*uy[pos])/cs2 + (ex[i]*ux[pos]+ey[i]*uy[pos])*(ex[i]*ux[pos]+ey[i]*uy[pos])/(2.*cs2*cs2) - u2/(2.*cs2));
-			ftemp[Q*pos + 6] = rho_back*rt[6]*(1. + (ex[6]*ux_back+ey[6]*uy_back)/cs2 + (ex[6]*ux_back+ey[6]*uy_back)*(ex[6]*ux_back+ey[6]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
-			ftemp[Q*pos + 3] = rho_back*rt[3]*(1. + (ex[3]*ux_back+ey[3]*uy_back)/cs2 + (ex[3]*ux_back+ey[3]*uy_back)*(ex[3]*ux_back+ey[3]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
-			ftemp[Q*pos + 7] = rho_back*rt[7]*(1. + (ex[7]*ux_back+ey[7]*uy_back)/cs2 + (ex[7]*ux_back+ey[7]*uy_back)*(ex[7]*ux_back+ey[7]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
-			bool transport_difference = false;
+			double feq_6 = rho_back*rt[6]*(1. + (ex[6]*ux_back+ey[6]*uy_back)/cs2 + (ex[6]*ux_back+ey[6]*uy_back)*(ex[6]*ux_back+ey[6]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			double feq_3 = rho_back*rt[3]*(1. + (ex[3]*ux_back+ey[3]*uy_back)/cs2 + (ex[3]*ux_back+ey[3]*uy_back)*(ex[3]*ux_back+ey[3]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			double feq_7 = rho_back*rt[7]*(1. + (ex[7]*ux_back+ey[7]*uy_back)/cs2 + (ex[7]*ux_back+ey[7]*uy_back)*(ex[7]*ux_back+ey[7]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
+			bool transport_difference = true;
 			if(transport_difference){
 				double f6_up,f6_down,f6_back;
 				double f3_up,f3_down,f3_back;
 				double f7_up,f7_down,f7_back;
-				f3_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+3] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+3 ];
-				f3_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+3] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+3 ];
+				f3_down = (double(x_right)-x_back)*(ftemp[Q*(x_right + y_down*ly)+3]-feq_3) + (x_back - double(x_left))*(ftemp[Q*(x_left + y_down*ly)+3 ]-feq_3);
+				f3_up = (double(x_right)-x_back)*(ftemp[Q*(x_right + y_down*ly)+3]-feq_3) + (x_back - double(x_left))*(ftemp[Q*(x_left + y_down*ly)+3 ]-feq_3);
 				f3_back = (double(y_up) - y_back)*f3_up + (y_back - double(y_down))*f3_down;
 
-				f6_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+6] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+6 ];
-				f6_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+6] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+6 ];
+				f6_down = (double(x_right)-x_back)*(ftemp[Q*(x_right + y_down*ly)+6]-feq_6) + (x_back - double(x_left))*(ftemp[Q*(x_left + y_down*ly)+6 ]-feq_6);
+				f6_up = (double(x_right)-x_back)*(ftemp[Q*(x_right + y_down*ly)+6]-feq_6) + (x_back - double(x_left))*(ftemp[Q*(x_left + y_down*ly)+6 ]-feq_6);
 				f6_back = (double(y_up) - y_back)*f6_up + (y_back - double(y_down))*f6_down;
 
-				f7_down = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+7] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+7];
-				f7_up = (double(x_right)-x_back)*ftemp[Q*(x_right + y_down*ly)+7] + (x_back - double(x_left))*ftemp[Q*(x_left + y_down*ly)+7 ];
+				f7_down = (double(x_right)-x_back)*(ftemp[Q*(x_right + y_down*ly)+7]-feq_7) + (x_back - double(x_left))*(ftemp[Q*(x_left + y_down*ly)+7]-feq_7);
+				f7_up = (double(x_right)-x_back)*(ftemp[Q*(x_right + y_down*ly)+7]-feq_7) + (x_back - double(x_left))*(ftemp[Q*(x_left + y_down*ly)+7 ]-feq_7);
 				f7_back = (double(y_up) - y_back)*f7_up + (y_back - double(y_down))*f7_down;
 
-				ftemp[Q*pos + 6] = f6_back;
-				ftemp[Q*pos + 3] = f3_back;
-				ftemp[Q*pos + 7] = f7_back;
+				ftemp[Q*pos + 6] = f6_back + feq_6;
+				ftemp[Q*pos + 3] = f3_back + feq_3;
+				ftemp[Q*pos + 7] = f7_back + feq_7;
 
+			}else{
+				ftemp[Q*pos + 6] = feq_6;
+				ftemp[Q*pos + 3] = feq_3;
+				ftemp[Q*pos + 7] = feq_7;
 			}
 			//std::cout<<"time: "<<time_step<<" We are inside the domain"<<std::endl;
 		}else{//case when we leave the domain. In this case just take the former value.

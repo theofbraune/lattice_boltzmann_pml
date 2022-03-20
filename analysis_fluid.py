@@ -4,14 +4,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import pandas as pd
+from tqdm import tqdm
 
 
 #pdb.set_trace()
 #table = ssv.loadf('0030_m.ssv')
-for index in range(0,3300,30):
+maximum_error = 0
+for index in tqdm(range(0,3000,30)):
+    
+
     step_string = "%04d" % (index,)
-    data1 = pd.read_csv('../result_collection/pml_with_stable_fluid/reference_solution_rocket_push_950/'+step_string+'_m.ssv',sep='\t')
-    data2 = pd.read_csv('../result_collection/pml_with_stable_fluid/pml_50_push_950/'+step_string+'_m.ssv',sep='\t')
+    data1 = pd.read_csv('../result_collection/rocket_reflection_top_bottom/reference_solution_rocket_4000_600_push_700/'+step_string+'_m.ssv',sep='\t')
+    data2 = pd.read_csv('../result_collection/rocket_reflection_top_bottom/first_order_moments/reference_800_600_push_700/'+step_string+'_m.ssv',sep='\t')
 
     vx1 = data1["ux"]
     vy1 = data1["uy"]
@@ -47,6 +51,8 @@ for index in range(0,3300,30):
 
     ux_numpy2 = vx2.to_numpy()
     uy_numpy2 = vy2.to_numpy()
+
+    #print("Test the shape:", ux_numpy2.size)
     obsval = obstacle.to_numpy()
     obsval.resize((sizey,sizex))
 
@@ -62,13 +68,16 @@ for index in range(0,3300,30):
 
     X,Y = np.meshgrid(x,y)
     
-    err = diff.max()
+    err = (diff.sum())**0.5
+    if(err>maximum_error):
+        maximum_error = err
 
-    plt.title("Plot of the difference after "+step_string+" time steps.\n The maximal error is: "+str(err))
-    plt.pcolormesh(X,Y,diff,cmap= cm.plasma)
-    plt.savefig("../result_collection/pml_with_stable_fluid/difference_rocket/difference_step_"+step_string+".png")
+    #plt.title("Plot of the difference after "+step_string+" time steps.\n The maximal error is: "+str(err))
+    #plt.pcolormesh(X,Y,diff,cmap= cm.plasma)
+    #plt.savefig("../result_collection/pml_with_stable_fluid/difference_rocket/difference_step_"+step_string+".png")
     #pdb.set_trace()
 
+print("The maximum error is: ",maximum_error)
 
 """
 plt.quiver(ux,uy, scale=1.5, headwidth=1.)
