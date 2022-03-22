@@ -27,4 +27,4 @@ DT_DENS  30
 TH_PML   50
 SIGMA_MAX 100.00
 T_PUSH   1200
-GEOFILE  ./system/blende_1500_1500
+GEOFILE  ./system/blende_900_900
