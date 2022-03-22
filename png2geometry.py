@@ -34,7 +34,7 @@ try:
 		geofile=pngfile.replace(".png","")
 		print('png: ', pngfile)
 		print('bmp: ',bmpfile)
-		pdb.set_trace()
+		#pdb.set_trace()
 		os.system("convert -monochrome %s %s" %(pngfile, bmpfile))
 		print("Reading BMP file.")
 		im=Image.open(bmpfile)
@@ -48,18 +48,18 @@ try:
 				dot=pix[x,y]
 				#if(dot>0):
 				#	print('dot value: ', dot)
-				#dot//=255
+				dot//=255
 				if (dot == 0) or (dot == 1):
 					"""
 					flip vertically: obstacle coordinates start
 					at bottom, image coordinates at top
 					"""
 					if(dot==0):
-						#dot = 1
-						pass
+						dot = 1
+						#pass
 					else:
-						#dot=0
-						pass
+						dot=0
+						#pass
 					out.append("%s %s %s"%(x,height-y-1,dot))
 				else:
 					print('dot: ', dot)
