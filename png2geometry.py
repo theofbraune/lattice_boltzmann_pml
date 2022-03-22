@@ -55,11 +55,11 @@ try:
 					at bottom, image coordinates at top
 					"""
 					if(dot==0):
-						dot = 1
-						#pass
+						#dot = 1
+						pass
 					else:
-						dot=0
-						#pass
+						#dot=0
+						pass
 					out.append("%s %s %s"%(x,height-y-1,dot))
 				else:
 					print('dot: ', dot)
