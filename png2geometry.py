@@ -21,6 +21,7 @@
 
 import os,sys
 from PIL import Image
+import pdb
 
 try:
 	if len(sys.argv) != 2:
@@ -33,13 +34,14 @@ try:
 		geofile=pngfile.replace(".png","")
 		print('png: ', pngfile)
 		print('bmp: ',bmpfile)
+		pdb.set_trace()
 		os.system("convert -monochrome %s %s" %(pngfile, bmpfile))
 		print("Reading BMP file.")
 		im=Image.open(bmpfile)
 		pix=im.load()
 	
 		out=[]
-	
+		
 		(width,height)=im.size
 		for x in range(0,width):
 			for y in range(0,height):

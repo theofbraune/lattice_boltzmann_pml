@@ -1497,7 +1497,7 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 			double feq_6 = rho_back*rt[6]*(1. + (ex[6]*ux_back+ey[6]*uy_back)/cs2 + (ex[6]*ux_back+ey[6]*uy_back)*(ex[6]*ux_back+ey[6]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			double feq_3 = rho_back*rt[3]*(1. + (ex[3]*ux_back+ey[3]*uy_back)/cs2 + (ex[3]*ux_back+ey[3]*uy_back)*(ex[3]*ux_back+ey[3]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			double feq_7 = rho_back*rt[7]*(1. + (ex[7]*ux_back+ey[7]*uy_back)/cs2 + (ex[7]*ux_back+ey[7]*uy_back)*(ex[7]*ux_back+ey[7]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
-			bool transport_difference = true;
+			bool transport_difference = false;
 			if(transport_difference){
 				double f6_up,f6_down,f6_back;
 				double f3_up,f3_down,f3_back;
