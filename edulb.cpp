@@ -294,7 +294,7 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 						std::cout<<" The values are: "<< double(x)<<" "<< double(y)<<" "<< ux[pos]<<" "<< uy[pos]<<std::endl;
 					}
 					
-					fprintf(fp, "%.6e\t%.6e\t%.3e\t%.3e\t%.3e\t%.3e\t%d\n", double(x), double(y-700), ux[pos], uy[pos], density[pos]*cs2, density[pos], int(obst[pos]));
+					fprintf(fp, "%.6e\t%.6e\t%.3e\t%.3e\t%.3e\t%.3e\t%d\n", double(x), double(y-450), ux[pos], uy[pos], density[pos]*cs2, density[pos], int(obst[pos]));
 				}	
 			}
 			if((y>449)&&(y<1050)){
@@ -850,7 +850,7 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 			//here specify the size of the outlet, resp the blast.
 			//if((y>(5.5*50.)) && (y<double(ly)-(5.5*50.))){ //good for pml 50 and size 600
 			//if((y>975) && (y<1025)){
-			if((y>725) && (y<775)){
+			if((y>724) && (y<775)){
 			//if(true){
 				
 				vf = ux0;
