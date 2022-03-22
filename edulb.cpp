@@ -148,7 +148,7 @@ int main(void)
 		//collision_mrt(f, ftemp, obst, omegaf); // RHS of Boltzmann equation: SRT
 		//collision_pml(density, ux, uy, pml, obst, f_eq_old, f);
 		calc_macr_quantities(density, ux, uy, f,pml, obst);
-		equilibrium_correction(pml,density,ux,uy,obst,f);
+		//equilibrium_correction(pml,density,ux,uy,obst,f);
 
 		// io stuff
 		if (t%dt_density==0)
@@ -279,8 +279,8 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 	strcpy(fileresults,file_m.c_str());
 	fp=fopen(fileresults, "w+");
 	fprintf(fp, "x\ty\tux\tuy\tpress\trho\tobsval\n");
-	bool save_compressed_for_reference = false;//this parameter allows to save the data on the domain of interest
-	bool save_semi_compressed = true;
+	bool save_compressed_for_reference = true;//this parameter allows to save the data on the domain of interest
+	bool save_semi_compressed = false;
 
 	if(save_compressed_for_reference){
 		for (y=0; y<ly; ++y)
@@ -289,7 +289,7 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 			{
 				pos=x+lx*y;
 				//these values are for a 2000 x 2000 box.
-				if((x<600)&&((y>699)&&(y<1300))){
+				if((x<600)&&((y>449)&&(y<1050))){
 					if(x==33 && y==1000){
 						std::cout<<" The values are: "<< double(x)<<" "<< double(y)<<" "<< ux[pos]<<" "<< uy[pos]<<std::endl;
 					}
@@ -297,7 +297,7 @@ bool write_results(vector<double>& density, vector<double>& ux, vector<double>&u
 					fprintf(fp, "%.6e\t%.6e\t%.3e\t%.3e\t%.3e\t%.3e\t%d\n", double(x), double(y-700), ux[pos], uy[pos], density[pos]*cs2, density[pos], int(obst[pos]));
 				}	
 			}
-			if((y>699)&&(y<1300)){
+			if((y>449)&&(y<1050)){
 				fprintf(fp, "\n");
 			}
 		}
@@ -834,7 +834,7 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 	double vf, ru, density_loc;
 	bool euler= true;
 	bool rk4=false;
-	bool upper_reflection = true;
+	bool upper_reflection = false;
 
 	//first consider left inlet
 	x=0; // velocity inlet at top of the domain, Zou and He
@@ -848,8 +848,9 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 		// vf=ux0*3./2.*(2.*y/(ly-1)-(1.*y/(ly-1))*(1.*y/(ly-1))); // Nusselt's velocity profile
 		if(time_step<time_push){
 			//here specify the size of the outlet, resp the blast.
-			if((y>(5.5*50.)) && (y<double(ly)-(5.5*50.))){ //good for pml 50 and size 600
+			//if((y>(5.5*50.)) && (y<double(ly)-(5.5*50.))){ //good for pml 50 and size 600
 			//if((y>975) && (y<1025)){
+			if((y>725) && (y<775)){
 			//if(true){
 				
 				vf = ux0;
@@ -1034,7 +1035,7 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 				ftemp[Q*pos + 8] = rho_back*rt[8]*(1. + (ex[8]*ux_back+ey[8]*uy_back)/cs2 + (ex[8]*ux_back+ey[8]*uy_back)*(ex[8]*ux_back+ey[8]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 				ftemp[Q*pos + 4] = rho_back*rt[4]*(1. + (ex[4]*ux_back+ey[4]*uy_back)/cs2 + (ex[4]*ux_back+ey[4]*uy_back)*(ex[4]*ux_back+ey[4]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 				ftemp[Q*pos + 7] = rho_back*rt[7]*(1. + (ex[7]*ux_back+ey[7]*uy_back)/cs2 + (ex[7]*ux_back+ey[7]*uy_back)*(ex[7]*ux_back+ey[7]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
-				bool transport_difference = false;
+				bool transport_difference = true;
 				if(transport_difference){
 					double f8_up,f8_down,f8_back;
 					double f4_up,f4_down,f4_back;
@@ -1497,7 +1498,7 @@ void boundary_stable_fluid(double ux0, const vector<double>& density, const vect
 			double feq_6 = rho_back*rt[6]*(1. + (ex[6]*ux_back+ey[6]*uy_back)/cs2 + (ex[6]*ux_back+ey[6]*uy_back)*(ex[6]*ux_back+ey[6]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			double feq_3 = rho_back*rt[3]*(1. + (ex[3]*ux_back+ey[3]*uy_back)/cs2 + (ex[3]*ux_back+ey[3]*uy_back)*(ex[3]*ux_back+ey[3]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
 			double feq_7 = rho_back*rt[7]*(1. + (ex[7]*ux_back+ey[7]*uy_back)/cs2 + (ex[7]*ux_back+ey[7]*uy_back)*(ex[7]*ux_back+ey[7]*uy_back)/(2.*cs2*cs2) - u2_back/(2.*cs2));
-			bool transport_difference = false;
+			bool transport_difference = true;
 			if(transport_difference){
 				double f6_up,f6_down,f6_back;
 				double f3_up,f3_down,f3_back;
